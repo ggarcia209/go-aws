@@ -114,7 +114,7 @@ func GetQueueURL(svc *sqs.SQS, name string) (string, error) {
 		QueueName: &name,
 	})
 	if err != nil {
-		log.Printf("CreateQueue failed: %v", err.Error())
+		log.Printf("GetQueueURLfailed: %v", err.Error())
 		return "", err
 	}
 	return *result.QueueUrl, nil

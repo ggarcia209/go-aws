@@ -3,13 +3,29 @@ package gosqs
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/sqs"
 )
+
+// error codes for invalid batch delete requests
+
+// ErrAWSInvalidParameter is eturned when ReceiptHandles/VisiblityTimeout are expired (AWS SDK Error).
+const ErrAWSInvalidParameter = "InvalidParameterValue"
+
+// ErrTooManyRequests is returned when a batch delete request is made with > 10 receipt handles for deletion.
+const ErrTooManyRequests = "TOO_MANY_REQUESTS"
+
+// ErrInvalidRequest is returned when the number of message IDs != the number of receipt handles in a batch delete request.
+const ErrInvalidRequest = "IDS_NOT_EQUAL_HANDLES"
+
+// ErrInvalidQueueURL is returned when a batch delete request is passed with an empty QueueURL field.
+const ErrInvalidQueueURL = "INVALID_QUEUE_URL"
 
 // SendMsgDefault contains the default options for the sqs.SendMessageInput object.
 var SendMsgDefault = SendMsgOptions{
@@ -31,6 +47,15 @@ type SendMsgOptions struct {
 	MessageGroupId          string
 	MessageSystemAttributes map[string]*sqs.MessageSystemAttributeValue
 	QueueURL                string
+}
+
+// SendMessageResponse wraps the sqs.SendMessageOutput object
+type SendMsgResponse struct {
+	MD5OfMessageAttributes       string `json:"md5_of_message_attributes"`
+	MD5OfMessageBody             string `json:"md5_of_message_body"`
+	MD5OfMessageSystemAttributes string `json:"md5_of_message_system_attributes"`
+	MessageId                    string `json:"message_id"`
+	SequenceNumber               string `json:"sequence_number"`
 }
 
 // RecMsgDefault contains the default values for the sqs.ReceiveMessageInput object.
@@ -55,12 +80,61 @@ type RecMsgOptions struct {
 	WaitTimeSeconds         int64
 }
 
+// Message wraps the sqs.Message type.
+type Message struct {
+	Attributes              map[string]string `json:"attributes"`
+	Body                    string            `json:"body"`
+	MD5OfBody               string            `json:"md5_of_body"`
+	MD5OfMessagefAttributes string            `json:"md5_of_message_attributes"`
+	MessageAttributes       map[string]MsgAV  `json:"message_attributes"`
+	MessageId               string            `json:"message_id"`
+	ReceiptHandle           string            `json:"receipt_handle"`
+}
+
 // MsgAV represents a single sqs.MessageAttributeValue or sqs.MessageSystemAttributeValue object.
 // Limited to StringValue types; BinaryValue not supported.
 type MsgAV struct {
 	Key      string
 	DataType string
 	Value    string
+}
+
+// DeleteMessageBatchRequest is used to create a new BatchDelete request.
+// len(MessageIDs) must equal len(ReceiptHandles). DeleteMessageBatch
+// assumes the order of MessageIDs corresponds to the order ReceiptHandles.
+type DeleteMessageBatchRequest struct {
+	QueueURL       string   `json:"queue_url"`
+	MessageIDs     []string `json:"message_ids"`
+	ReceiptHandles []string `json:"receipt_handles"`
+}
+
+// DeleteMessageBatchResponse wraps the sqs.DeleteMessageBatchOutput type.
+type DeleteMessageBatchResponse struct {
+	Failed     []BatchDeleteErrEntry    `json:"failed"`
+	Successful []BatchDeleteResultEntry `json:"successful"`
+}
+
+// BatchDeleteErrEntry wraps the sqs.BatchResultErrorEntry type.
+type BatchDeleteErrEntry struct {
+	ErrorCode     string `json:"error_code"`
+	MessageID     string `json:"message_id"`
+	ReceiptHandle string `json:"receipt_handle"` // not in sqs.BatchResultErrorEntry type - added for utility
+	ErrorMessage  string `json:"error_message"`
+	SenderFault   bool   `json:"sender_fault"`
+}
+
+// BatchDeleteResultEntry wraps the sqs.DeleteMessageBatchResultEntry type.
+type BatchDeleteResultEntry struct {
+	MessageID string `json:"message_id"`
+}
+
+type msgErr struct {
+	Code    string
+	Message string
+}
+
+func (e *msgErr) Error() string {
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
 // CreateMsgAttributes creates a MessageAttributeValue map from a list of MsgAV objects.
@@ -104,7 +178,7 @@ func CreateMsgAttribute(key, dataType, value string) MsgAV {
 // SendMessage sends a new message to a queue per the options argument.
 // Unique MD5 checksums are generated for the MessageDeduplicationID
 // and MessageGroupID fields if not set for messages sent to FIFO Queues.
-func SendMessage(svc *sqs.SQS, options SendMsgOptions) error {
+func SendMessage(svc *sqs.SQS, options SendMsgOptions) (SendMsgResponse, error) {
 	// ensure values are valid
 	if options.DelaySeconds < 0 {
 		options.DelaySeconds = 0
@@ -133,16 +207,18 @@ func SendMessage(svc *sqs.SQS, options SendMsgOptions) error {
 		}
 	}
 
-	_, err := svc.SendMessage(input)
+	out, err := svc.SendMessage(input)
 	if err != nil {
 		log.Printf("SendMessage failed: %v", err.Error())
-		return err
+		return SendMsgResponse{}, err
 	}
-	return nil
+	resp := wrapSendMsgOutput(out)
+	return resp, nil
 }
 
 // ReceiveMessage receives a message from a queue per the options argument
-func ReceiveMessage(svc *sqs.SQS, options RecMsgOptions) ([]*sqs.Message, error) {
+func ReceiveMessage(svc *sqs.SQS, options RecMsgOptions) ([]Message, error) {
+	msgs := []Message{}
 	// ensure values are valid
 	if options.MaxNumberOfMessages < 1 {
 		options.MaxNumberOfMessages = 1
@@ -178,11 +254,56 @@ func ReceiveMessage(svc *sqs.SQS, options RecMsgOptions) ([]*sqs.Message, error)
 	})
 	if err != nil {
 		log.Printf("ReceiveMessage failed: %v", err.Error())
-		return msgResult.Messages, err
+		return msgs, err
 	}
-	return msgResult.Messages, nil
+	for _, msg := range msgResult.Messages {
+		conv := convertMessage(msg)
+		msgs = append(msgs, conv)
+	}
+	return msgs, nil
 }
 
+func wrapSendMsgOutput(out *sqs.SendMessageOutput) SendMsgResponse {
+	resp := SendMsgResponse{
+		MD5OfMessageAttributes:       *out.MD5OfMessageAttributes,
+		MD5OfMessageBody:             *out.MD5OfMessageBody,
+		MD5OfMessageSystemAttributes: *out.MD5OfMessageSystemAttributes,
+		MessageId:                    *out.MessageId,
+		SequenceNumber:               *out.SequenceNumber,
+	}
+	return resp
+}
+
+// convert *sqsMessage type to Message struct
+func convertMessage(msg *sqs.Message) Message {
+	attributes := make(map[string]string)
+	for k, v := range msg.Attributes {
+		attributes[k] = *v
+	}
+	msgAttributes := make(map[string]MsgAV)
+	for k, v := range msg.MessageAttributes {
+		av := MsgAV{
+			Key:      k,
+			DataType: *v.DataType,
+			Value:    *v.StringValue,
+		}
+		msgAttributes[k] = av
+	}
+	conv := Message{
+		Attributes:        attributes,
+		Body:              *msg.Body,
+		MD5OfBody:         *msg.MD5OfBody,
+		MessageAttributes: msgAttributes,
+		MessageId:         *msg.MessageId,
+		ReceiptHandle:     *msg.ReceiptHandle,
+	}
+	if msg.MD5OfMessageAttributes != nil {
+		conv.MD5OfMessagefAttributes = *msg.MD5OfMessageAttributes
+	}
+	return conv
+}
+
+// determine if FIFO queue from url (".fifo")
 func checkFifo(url string) bool {
 	spl := strings.Split(url, ".")
 	if len(spl) > 1 {
@@ -194,6 +315,8 @@ func checkFifo(url string) bool {
 	return false
 }
 
+// GenerateDedupeID generates a MD5 hash from a
+// timestamp of the current time + the given queue url
 func GenerateDedupeID(url string) string {
 	timestamp := time.Now()
 	hash := md5.Sum([]byte(url + timestamp.String()))
@@ -209,8 +332,86 @@ func DeleteMessage(svc *sqs.SQS, url, handle string) error {
 		ReceiptHandle: aws.String(handle),
 	})
 	if err != nil {
-		log.Printf("DeleteMessage failed: %v", err.Error())
+		if awsErr, ok := err.(awserr.Error); ok {
+			log.Printf("DeleteMessage failed: %v: %v", awsErr.Code(), awsErr.Message())
+			if awsErr.Code() == ErrAWSInvalidParameter {
+				return fmt.Errorf(awsErr.Code())
+			}
+			return err
+		}
+		log.Printf("DeleteMessage failed: %v", err)
 		return err
 	}
 	return nil
+}
+
+// DeleteMessageBatch deletes a batch of messages
+func DeleteMessageBatch(svc *sqs.SQS, req DeleteMessageBatchRequest) (DeleteMessageBatchResponse, error) {
+	if len(req.ReceiptHandles) > 10 {
+		err := fmt.Errorf(ErrTooManyRequests)
+		return DeleteMessageBatchResponse{}, err
+	}
+	if len(req.MessageIDs) != len(req.ReceiptHandles) {
+		err := fmt.Errorf(ErrInvalidRequest)
+		return DeleteMessageBatchResponse{}, err
+	}
+	if req.QueueURL == "" {
+		err := fmt.Errorf(ErrInvalidQueueURL)
+		return DeleteMessageBatchResponse{}, err
+	}
+
+	handles := make(map[string]string)
+	entries := []*sqs.DeleteMessageBatchRequestEntry{}
+	for i, handle := range req.ReceiptHandles {
+		msgID := req.MessageIDs[i]
+		entry := &sqs.DeleteMessageBatchRequestEntry{
+			Id:            aws.String(msgID),
+			ReceiptHandle: aws.String(handle),
+		}
+		handles[msgID] = handle
+		entries = append(entries, entry)
+	}
+	batchRequest := &sqs.DeleteMessageBatchInput{
+		Entries:  entries,
+		QueueUrl: aws.String(req.QueueURL),
+	}
+	result, err := svc.DeleteMessageBatch(batchRequest)
+	if err != nil {
+		wrap := wrapBatchDeleteOutput(result, handles)
+		log.Printf("DeleteMessageBatch failed: %v", err)
+		return wrap, err
+	}
+	wrap := wrapBatchDeleteOutput(result, handles)
+	return wrap, err
+}
+
+// wrap sqs.DeleteMessageBatchOutput object
+func wrapBatchDeleteOutput(output *sqs.DeleteMessageBatchOutput, handles map[string]string) DeleteMessageBatchResponse {
+	wrapSuccessful := []BatchDeleteResultEntry{}
+	wrapFailed := []BatchDeleteErrEntry{}
+	successful := output.Successful
+	failed := output.Failed
+
+	for _, entry := range successful {
+		wrap := BatchDeleteResultEntry{
+			MessageID: *entry.Id,
+		}
+		wrapSuccessful = append(wrapSuccessful, wrap)
+	}
+	for _, entry := range failed {
+		msgID := *entry.Id
+		wrap := BatchDeleteErrEntry{
+			ErrorCode:     *entry.Code,
+			MessageID:     msgID,
+			ReceiptHandle: handles[msgID],
+			ErrorMessage:  *entry.Message,
+			SenderFault:   *entry.SenderFault,
+		}
+		wrapFailed = append(wrapFailed, wrap)
+	}
+	wrap := DeleteMessageBatchResponse{
+		Successful: wrapSuccessful,
+		Failed:     wrapFailed,
+	}
+	return wrap
 }
