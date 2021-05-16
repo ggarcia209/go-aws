@@ -15,8 +15,11 @@ import (
 
 // error codes for invalid batch delete requests
 
-// ErrAWSInvalidParameter is eturned when ReceiptHandles/VisiblityTimeout are expired (AWS SDK Error).
+// ErrAWSInvalidParameter is returned when ReceiptHandles/VisiblityTimeout are expired (AWS SDK Error).
 const ErrAWSInvalidParameter = "InvalidParameterValue"
+
+// ErrMissingParameter is returned when an empty ReceiptHandle value is passed to DeleteMessage.
+const ErrAWSMissingParameter = "MissingParameter"
 
 // ErrTooManyRequests is returned when a batch delete request is made with > 10 receipt handles for deletion.
 const ErrTooManyRequests = "TOO_MANY_REQUESTS"
@@ -264,12 +267,21 @@ func ReceiveMessage(svc *sqs.SQS, options RecMsgOptions) ([]Message, error) {
 }
 
 func wrapSendMsgOutput(out *sqs.SendMessageOutput) SendMsgResponse {
-	resp := SendMsgResponse{
-		MD5OfMessageAttributes:       *out.MD5OfMessageAttributes,
-		MD5OfMessageBody:             *out.MD5OfMessageBody,
-		MD5OfMessageSystemAttributes: *out.MD5OfMessageSystemAttributes,
-		MessageId:                    *out.MessageId,
-		SequenceNumber:               *out.SequenceNumber,
+	resp := SendMsgResponse{}
+	if out.MD5OfMessageAttributes != nil {
+		resp.MD5OfMessageAttributes = *out.MD5OfMessageAttributes
+	}
+	if out.MD5OfMessageBody != nil {
+		resp.MD5OfMessageBody = *out.MD5OfMessageBody
+	}
+	if out.MD5OfMessageSystemAttributes != nil {
+		resp.MD5OfMessageSystemAttributes = *out.MD5OfMessageSystemAttributes
+	}
+	if out.MessageId != nil {
+		resp.MessageId = *out.MessageId
+	}
+	if out.SequenceNumber != nil {
+		resp.SequenceNumber = *out.SequenceNumber
 	}
 	return resp
 }
@@ -334,7 +346,7 @@ func DeleteMessage(svc *sqs.SQS, url, handle string) error {
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			log.Printf("DeleteMessage failed: %v: %v", awsErr.Code(), awsErr.Message())
-			if awsErr.Code() == ErrAWSInvalidParameter {
+			if awsErr.Code() == ErrAWSInvalidParameter || awsErr.Code() == ErrAWSMissingParameter {
 				return fmt.Errorf(awsErr.Code())
 			}
 			return err

@@ -70,7 +70,7 @@ var fifoOptions2 = QueueOptions{
 }
 
 // 5/6/21 - PASS
-func TestCreateQueue(t *testing.T) {
+/* func TestCreateQueue(t *testing.T) {
 	var tests = []struct {
 		name    string
 		options QueueOptions
@@ -141,6 +141,27 @@ func TestDeleteQueue(t *testing.T) {
 		err = DeleteQueue(sqsTest, url)
 		if err != nil {
 			t.Errorf("DeleteQueue failed (%s): %v", test, err)
+		}
+	}
+} */
+
+func TestDeleteQueue(t *testing.T) {
+	var tests = []struct {
+		input string
+		want  string // error code
+	}{
+		{"https://sqs.us-west-2.amazonaws.com/840111470667/test-001", ""},                     // delete existing
+		{"https://sqs.us-west-2.amazonaws.com/840111470667/test-001", ErrAWSNonExistentQueue}, // delete non-existent
+	}
+	for _, test := range tests {
+		err := DeleteQueue(sqsTest, test.input)
+		if err != nil {
+			if err.Error() != test.want {
+				t.Errorf("DeleteQueue failed (%s): %v", test.input, err)
+			}
+		}
+		if err == nil && test.want != "" {
+			t.Errorf("DeleteQueue failed (%s): %v", test.input, err)
 		}
 	}
 }

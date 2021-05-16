@@ -5,9 +5,12 @@ import (
 	"log"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
 )
+
+const ErrAWSNonExistentQueue = "AWS.SimpleQueueService.NonExistentQueue"
 
 // QueueDefault contains the default attribute values for new SQS Queue objects
 var QueueDefault = QueueOptions{
@@ -126,6 +129,13 @@ func DeleteQueue(svc *sqs.SQS, url string) error {
 		QueueUrl: aws.String(url),
 	})
 	if err != nil {
+		if awsErr, ok := err.(awserr.Error); ok {
+			log.Printf("DeleteQueue failed: %v: %v", awsErr.Code(), awsErr.Message())
+			if awsErr.Code() == ErrAWSNonExistentQueue {
+				return fmt.Errorf(awsErr.Code())
+			}
+			return err
+		}
 		log.Printf("DeleteQueue failed: %v", err.Error())
 		return err
 	}

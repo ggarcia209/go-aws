@@ -48,9 +48,15 @@ var msg3 = SendMsgOptions{
 	QueueURL:                "",
 }
 
-var recMsg1 = RecMsgOptions{}
+var testMsgIDs = []string{
+	"981f6cf7-27ed-44e5-86ca-7692cd75ac90",
+	"e74924e1-e946-41fa-9625-5a3aa1cc618c",
+}
 
-var recMsg2 = RecMsgOptions{}
+var testRecHandles = []string{
+	"AQEBgIDmFAUw0/Dm2t3a38mDgYu44xOsHNoEe9U06Q2HN2pHs7QoZ98VuMSnEMo5jqGanOBpjGjsh/Zz04fnznR4s/7+SaIvZe+yMeRG6TKyW6kgfaarLx6tUqXEXjxEznRpIOCpBrLQRD1xwFm30bJLN8xGWZAd7bZEG4/uu8QKSA/aQ2ldeTjb5nIoRuO/wFR4F+BckwoLl5Q8YMMzF58x3f3bqbqNihxKW84uS3SUKYCH5cuAmCGR98iZ02hmXsQoK450HgLzBt6Ys966SAl9z06T91h4lZSzjkqMBIwSeaA=",
+	"AQEBcdPxL7Y+SDLmih+QU9t3s5s6RFFSDcu2X29fUBTJCWf+BFJR43P0iDeCVEFgV58EsK5sJ2+v1pEznJqzmwhB9aTLqb5pB6SDe/FuKZDMsb1oszC8N9ifmkXp1mjo/tnjRrajlYWN6cf8ztnjhFk8c9FdvzUPvG98NgxJuttgY5QQjIE8Kzrbq/EtS7kbEKNWeEFdrLVlSKQoAfz3/jbjdOPNAiVNvyoWYGn3KQynoYaFMWK8ZbnkMtdQWnT5gPRXNQVid1yLr7ywJ/PFQkvGQvNJC8R9tgb4miChWIvBISI=",
+}
 
 // 5/6/2021 - PASS
 func TestSendMessage(t *testing.T) {
@@ -68,7 +74,7 @@ func TestSendMessage(t *testing.T) {
 			t.Errorf("GetQueueURL failed (%s): %v", test.name, err)
 		}
 		test.options.QueueURL = url
-		err = SendMessage(sqsTest, test.options)
+		_, err = SendMessage(sqsTest, test.options)
 		if err != nil {
 			t.Errorf("SendMessage failed: %v", err)
 		}
@@ -149,10 +155,37 @@ func TestDeleteMessage(t *testing.T) {
 		}
 		for _, msg := range msgs {
 			handle := msg.ReceiptHandle
-			err = DeleteMessage(sqsTest, url, *handle)
+			err = DeleteMessage(sqsTest, url, handle)
 			if err != nil {
 				t.Errorf("DeleteMessage failed: %v", err)
 			}
 		}
+	}
+}
+
+//
+func TestDeleteMesssageBatch(t *testing.T) {
+	var tests = []struct {
+		input DeleteMessageBatchRequest
+		want  error
+	}{
+		{input: DeleteMessageBatchRequest{ // test delete with non-empty queue
+			QueueURL:       "https://sqs.us-west-2.amazonaws.com/840111470667/us-west-san_francisco.fifo",
+			MessageIDs:     testMsgIDs,
+			ReceiptHandles: testRecHandles,
+		}, want: nil},
+		{input: DeleteMessageBatchRequest{ // test delete with empty queue
+			QueueURL:       "https://sqs.us-west-2.amazonaws.com/840111470667/us-west-san_francisco.fifo",
+			MessageIDs:     testMsgIDs,
+			ReceiptHandles: testRecHandles,
+		}, want: nil},
+	}
+	for _, test := range tests {
+		resp, err := DeleteMessageBatch(sqsTest, test.input)
+		if err != test.want {
+			t.Errorf("FAIL - error: %v", err)
+		}
+		t.Logf("succeeded: %v", resp.Successful)
+		t.Logf("failed: %v", resp.Failed)
 	}
 }
