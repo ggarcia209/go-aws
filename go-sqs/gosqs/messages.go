@@ -137,19 +137,19 @@ type BatchUpdateVisibilityTimeoutRequest struct {
 	QueueURL       string   `json:"queue_url"`
 	MessageIDs     []string `json:"message_ids"`
 	ReceiptHandles []string `json:"receipt_handles"`
-	TimeoutMs      int      `json:"timeout_ms"`
+	TimeoutSeconds int      `json:"timeout_seconds"`
 }
 
 // BatchUpdateVisibilityTimeoutRequest wraps the output of the
 // sqs.ChangeMessageVisibilityTImeout function (*sqs.ChangeMessageVisibilityOutput).
 type BatchUpdateVisibilityTimeoutResponse struct {
-	Failed     []BatchUpdateVisiblityTimeoutErrEntry `json:"failed"`
-	Successful []BatchUpdateVisiblityTimeoutEntry    `json:"successful"`
+	Failed     []BatchUpdateVisibilityTimeoutErrEntry `json:"failed"`
+	Successful []BatchUpdateVisibilityTimeoutEntry    `json:"successful"`
 }
 
 // BatchUpdateVisibilityTimeoutErrEntry wraps the output *sqs.BatchResultErrorEntry object
 // returned from BatchChangeMessageVisiblity timeout operations.
-type BatchUpdateVisiblityTimeoutErrEntry struct {
+type BatchUpdateVisibilityTimeoutErrEntry struct {
 	ErrorCode    string `json:"code"`
 	MessageId    string `json:"id"`
 	ErrorMessage string `json:"message"`
@@ -157,7 +157,7 @@ type BatchUpdateVisiblityTimeoutErrEntry struct {
 }
 
 // BatchUpdateVisibilityTimeoutEntry wraps the output *sqs.ChangeMessageVisibilityBatchResult object.
-type BatchUpdateVisiblityTimeoutEntry struct {
+type BatchUpdateVisibilityTimeoutEntry struct {
 	MessageID string `json:"message_id"`
 }
 
@@ -482,7 +482,7 @@ func ChangeMessageVisibilityBatch(svc *sqs.SQS, req BatchUpdateVisibilityTimeout
 		entry := &sqs.ChangeMessageVisibilityBatchRequestEntry{
 			Id:                aws.String(id),
 			ReceiptHandle:     aws.String(req.ReceiptHandles[i]),
-			VisibilityTimeout: aws.Int64(int64(req.TimeoutMs)),
+			VisibilityTimeout: aws.Int64(int64(req.TimeoutSeconds)),
 		}
 		entries = append(entries, entry)
 	}
@@ -499,18 +499,18 @@ func ChangeMessageVisibilityBatch(svc *sqs.SQS, req BatchUpdateVisibilityTimeout
 
 // wrap sqs.DeleteMessageBatchOutput object
 func wrapBatchUpdateVisibilityTimeoutOutput(output *sqs.ChangeMessageVisibilityBatchOutput) BatchUpdateVisibilityTimeoutResponse {
-	wrapSuccessful := []BatchUpdateVisiblityTimeoutEntry{}
-	wrapFailed := []BatchUpdateVisiblityTimeoutErrEntry{}
+	wrapSuccessful := []BatchUpdateVisibilityTimeoutEntry{}
+	wrapFailed := []BatchUpdateVisibilityTimeoutErrEntry{}
 
 	for _, entry := range output.Successful {
-		wrap := BatchUpdateVisiblityTimeoutEntry{
+		wrap := BatchUpdateVisibilityTimeoutEntry{
 			MessageID: *entry.Id,
 		}
 		wrapSuccessful = append(wrapSuccessful, wrap)
 	}
 	for _, entry := range output.Failed {
 		msgID := *entry.Id
-		wrap := BatchUpdateVisiblityTimeoutErrEntry{
+		wrap := BatchUpdateVisibilityTimeoutErrEntry{
 			ErrorCode:    *entry.Code,
 			MessageId:    msgID,
 			ErrorMessage: *entry.Message,

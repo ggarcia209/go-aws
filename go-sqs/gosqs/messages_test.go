@@ -217,7 +217,7 @@ func TestChangeMessageVisibilityBatch(t *testing.T) {
 			QueueURL:       url,
 			MessageIDs:     msgIDs,
 			ReceiptHandles: handles,
-			TimeoutMs:      5,
+			TimeoutSeconds: 5,
 		}
 		resp, err := ChangeMessageVisibilityBatch(sqsTest, req)
 		if err != nil {
@@ -250,7 +250,7 @@ func BenchmarkChangeMessageVisibilityBatch(b *testing.B) {
 		QueueURL:       url,
 		MessageIDs:     msgIDs,
 		ReceiptHandles: handles,
-		TimeoutMs:      0,
+		TimeoutSeconds: 0,
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
