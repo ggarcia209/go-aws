@@ -69,7 +69,7 @@ var RecMsgDefault = RecMsgOptions{
 	QueueURL:                "",
 	ReceiveRequestAttemptId: "",
 	VisibilityTimeout:       int64(30),
-	WaitTimeSeconds:         int64(3),
+	WaitTimeSeconds:         int64(0),
 }
 
 // RecMsgOptions is used to pass receive message options to the sqs.ReceiveMessageInput object.
@@ -128,6 +128,36 @@ type BatchDeleteErrEntry struct {
 
 // BatchDeleteResultEntry wraps the sqs.DeleteMessageBatchResultEntry type.
 type BatchDeleteResultEntry struct {
+	MessageID string `json:"message_id"`
+}
+
+// BatchUpdateVisibilityTimeoutRequest is used as input to the
+// BatchUpdateVisibilityTimeout function.
+type BatchUpdateVisibilityTimeoutRequest struct {
+	QueueURL       string   `json:"queue_url"`
+	MessageIDs     []string `json:"message_ids"`
+	ReceiptHandles []string `json:"receipt_handles"`
+	TimeoutMs      int      `json:"timeout_ms"`
+}
+
+// BatchUpdateVisibilityTimeoutRequest wraps the output of the
+// sqs.ChangeMessageVisibilityTImeout function (*sqs.ChangeMessageVisibilityOutput).
+type BatchUpdateVisibilityTimeoutResponse struct {
+	Failed     []BatchUpdateVisiblityTimeoutErrEntry `json:"failed"`
+	Successful []BatchUpdateVisiblityTimeoutEntry    `json:"successful"`
+}
+
+// BatchUpdateVisibilityTimeoutErrEntry wraps the output *sqs.BatchResultErrorEntry object
+// returned from BatchChangeMessageVisiblity timeout operations.
+type BatchUpdateVisiblityTimeoutErrEntry struct {
+	ErrorCode    string `json:"code"`
+	MessageId    string `json:"id"`
+	ErrorMessage string `json:"message"`
+	SenderFault  bool   `json:"sender_fault"`
+}
+
+// BatchUpdateVisibilityTimeoutEntry wraps the output *sqs.ChangeMessageVisibilityBatchResult object.
+type BatchUpdateVisiblityTimeoutEntry struct {
 	MessageID string `json:"message_id"`
 }
 
@@ -422,6 +452,73 @@ func wrapBatchDeleteOutput(output *sqs.DeleteMessageBatchOutput, handles map[str
 		wrapFailed = append(wrapFailed, wrap)
 	}
 	wrap := DeleteMessageBatchResponse{
+		Successful: wrapSuccessful,
+		Failed:     wrapFailed,
+	}
+	return wrap
+}
+
+// ChangeMessageVisibilityBatch updates the visibility timeout for a batch of messages
+// represented by the given MessageIds and ReceiptHandles. Assumes msgIDs[i] and handles[i] args
+// are in order and correspond to the same message.
+func ChangeMessageVisibilityBatch(svc *sqs.SQS, req BatchUpdateVisibilityTimeoutRequest) (BatchUpdateVisibilityTimeoutResponse, error) {
+	resp := BatchUpdateVisibilityTimeoutResponse{}
+	if len(req.MessageIDs) != len(req.ReceiptHandles) {
+		log.Printf("ChangeMessageVisibilityBatch failed: Invalid request")
+		return resp, fmt.Errorf("INVALID_REQUEST")
+	}
+	if len(req.MessageIDs) == 0 {
+		log.Printf("ChangeMessageVisibilityBatch failed: Empty request")
+		return resp, fmt.Errorf("EMPTY_REQUEST")
+	}
+	if len(req.MessageIDs) > 10 {
+		log.Printf("ChangeMessageVisibilityBatch failed: Too many entries (%d); max 10", len(req.MessageIDs))
+		return resp, fmt.Errorf("INVALID_REQUEST")
+	}
+	input := &sqs.ChangeMessageVisibilityBatchInput{}
+	input.QueueUrl = aws.String(req.QueueURL)
+	entries := []*sqs.ChangeMessageVisibilityBatchRequestEntry{}
+	for i, id := range req.MessageIDs {
+		entry := &sqs.ChangeMessageVisibilityBatchRequestEntry{
+			Id:                aws.String(id),
+			ReceiptHandle:     aws.String(req.ReceiptHandles[i]),
+			VisibilityTimeout: aws.Int64(int64(req.TimeoutMs)),
+		}
+		entries = append(entries, entry)
+	}
+	input.Entries = entries
+	output, err := svc.ChangeMessageVisibilityBatch(input)
+	if err != nil {
+		log.Printf("ChangeMessageVisibilityBatch failed: %v", err)
+		return resp, err
+	}
+	resp = wrapBatchUpdateVisibilityTimeoutOutput(output)
+
+	return resp, nil
+}
+
+// wrap sqs.DeleteMessageBatchOutput object
+func wrapBatchUpdateVisibilityTimeoutOutput(output *sqs.ChangeMessageVisibilityBatchOutput) BatchUpdateVisibilityTimeoutResponse {
+	wrapSuccessful := []BatchUpdateVisiblityTimeoutEntry{}
+	wrapFailed := []BatchUpdateVisiblityTimeoutErrEntry{}
+
+	for _, entry := range output.Successful {
+		wrap := BatchUpdateVisiblityTimeoutEntry{
+			MessageID: *entry.Id,
+		}
+		wrapSuccessful = append(wrapSuccessful, wrap)
+	}
+	for _, entry := range output.Failed {
+		msgID := *entry.Id
+		wrap := BatchUpdateVisiblityTimeoutErrEntry{
+			ErrorCode:    *entry.Code,
+			MessageId:    msgID,
+			ErrorMessage: *entry.Message,
+			SenderFault:  *entry.SenderFault,
+		}
+		wrapFailed = append(wrapFailed, wrap)
+	}
+	wrap := BatchUpdateVisibilityTimeoutResponse{
 		Successful: wrapSuccessful,
 		Failed:     wrapFailed,
 	}

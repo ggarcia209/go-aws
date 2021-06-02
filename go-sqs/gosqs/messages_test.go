@@ -189,3 +189,74 @@ func TestDeleteMesssageBatch(t *testing.T) {
 		t.Logf("failed: %v", resp.Failed)
 	}
 }
+
+func TestChangeMessageVisibilityBatch(t *testing.T) {
+	var tests = []struct {
+		input RecMsgOptions
+		want  error
+	}{
+		{RecMsgDefault, nil},
+	}
+	msgIDs, handles := []string{}, []string{}
+	url, err := GetQueueURL(sqsTest, "test-queue.fifo")
+	if err != nil {
+		t.Errorf("GetQueueURL failed: %v", err)
+	}
+	for _, test := range tests {
+		test.input.MaxNumberOfMessages = 10
+		test.input.QueueURL = url
+		msgs, err := ReceiveMessage(sqsTest, test.input)
+		if err != nil {
+			t.Errorf("ReceiveMessage failed: %v", err)
+		}
+		for _, msg := range msgs {
+			msgIDs = append(msgIDs, msg.MessageId)
+			handles = append(handles, msg.ReceiptHandle)
+		}
+		req := BatchUpdateVisibilityTimeoutRequest{
+			QueueURL:       url,
+			MessageIDs:     msgIDs,
+			ReceiptHandles: handles,
+			TimeoutMs:      5,
+		}
+		resp, err := ChangeMessageVisibilityBatch(sqsTest, req)
+		if err != nil {
+			t.Errorf("FAIL: %v", err)
+		}
+		for _, fail := range resp.Failed {
+			t.Errorf("FAIL - AWS err: %v", fail.ErrorCode)
+		}
+	}
+}
+
+func BenchmarkChangeMessageVisibilityBatch(b *testing.B) {
+	msgIDs, handles := []string{}, []string{}
+	url, err := GetQueueURL(sqsTest, "test-queue.fifo")
+	if err != nil {
+		b.Errorf("GetQueueURL failed: %v", err)
+	}
+	input := RecMsgDefault
+	input.MaxNumberOfMessages = 10
+	input.QueueURL = url
+	msgs, err := ReceiveMessage(sqsTest, input)
+	if err != nil {
+		b.Errorf("ReceiveMessage failed: %v", err)
+	}
+	for _, msg := range msgs {
+		msgIDs = append(msgIDs, msg.MessageId)
+		handles = append(handles, msg.ReceiptHandle)
+	}
+	req := BatchUpdateVisibilityTimeoutRequest{
+		QueueURL:       url,
+		MessageIDs:     msgIDs,
+		ReceiptHandles: handles,
+		TimeoutMs:      0,
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := ChangeMessageVisibilityBatch(sqsTest, req)
+		if err != nil {
+			b.Errorf("FAIL: %v", err)
+		}
+	}
+}
