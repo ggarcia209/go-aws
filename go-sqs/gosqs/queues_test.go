@@ -70,7 +70,7 @@ var fifoOptions2 = QueueOptions{
 }
 
 // 5/6/21 - PASS
-/* func TestCreateQueue(t *testing.T) {
+func TestCreateQueue(t *testing.T) {
 	var tests = []struct {
 		name    string
 		options QueueOptions
@@ -125,25 +125,6 @@ func TestPurgeQueue(t *testing.T) {
 		}
 	}
 }
-
-// 5/6/21 - PASS
-func TestDeleteQueue(t *testing.T) {
-	var tests = []string{
-		"test-001",
-		"test-002.fifo",
-		"test-003.fifo",
-	}
-	for _, test := range tests {
-		url, err := GetQueueURL(sqsTest, test)
-		if err != nil {
-			t.Errorf("GetQueueURL failed (%s): %v", test, err)
-		}
-		err = DeleteQueue(sqsTest, url)
-		if err != nil {
-			t.Errorf("DeleteQueue failed (%s): %v", test, err)
-		}
-	}
-} */
 
 func TestDeleteQueue(t *testing.T) {
 	var tests = []struct {
