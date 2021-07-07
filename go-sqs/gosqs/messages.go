@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -371,9 +370,8 @@ func checkFifo(url string) bool {
 
 // GenerateDedupeID generates a MD5 hash from a
 // timestamp of the current time + the given queue url.
-func GenerateDedupeID(url string) string {
-	timestamp := time.Now()
-	hash := md5.Sum([]byte(url + timestamp.String()))
+func GenerateDedupeID(msgBody string) string {
+	hash := md5.Sum([]byte(msgBody))
 	hashStr := hex.EncodeToString(hash[:])
 	return hashStr
 }
