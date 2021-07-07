@@ -6,6 +6,7 @@ package dynamo
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 
@@ -24,14 +25,12 @@ func InitSesh() *dynamodb.DynamoDB {
 		SharedConfigState: session.SharedConfigEnable,
 	}))
 
-	fmt.Println("session intialized")
-	fmt.Println("region: ", aws.StringValue(sesh.Config.Region))
+	log.Println("session intialized")
+	log.Println("region: ", aws.StringValue(sesh.Config.Region))
 
 	// Create DynamoDB client
 	svc := dynamodb.New(sesh)
-
-	fmt.Println("DynamoDB client initialized")
-	fmt.Println()
+	log.Println("DynamoDB client initialized")
 
 	return svc
 }
@@ -131,9 +130,8 @@ func CreateTable(svc *dynamodb.DynamoDB, table *Table) error {
 func CreateItem(svc *dynamodb.DynamoDB, item interface{}, table *Table) error {
 	av, err := dynamodbattribute.MarshalMap(item)
 	if err != nil {
-		fmt.Println("Got error marshalling new movie item: ")
-		fmt.Println(err.Error())
-		return fmt.Errorf("CreateItem failed: %v", err)
+		log.Printf("CreateItem failed: Got error marshalling new movie item: %v", err)
+		return err
 	}
 
 	input := &dynamodb.PutItemInput{
@@ -143,12 +141,11 @@ func CreateItem(svc *dynamodb.DynamoDB, item interface{}, table *Table) error {
 
 	_, err = svc.PutItem(input)
 	if err != nil {
-		fmt.Println("Got error calling PutItem:")
-		fmt.Println(err.Error())
-		return fmt.Errorf("CreateItem failed: %v", err)
+		log.Printf("CreateItem failed: %v", err)
+		return err
 	}
 
-	fmt.Printf("Successfully added item to table %s\n", table.TableName)
+	log.Printf("Successfully added item to table %s\n", table.TableName)
 	return nil
 }
 
@@ -162,14 +159,14 @@ func GetItem(svc *dynamodb.DynamoDB, q *Query, t *Table, item interface{}) (inte
 		Key:       key,
 	})
 	if err != nil {
-		fmt.Println(err.Error())
-		return nil, fmt.Errorf("GetItem failed: %v", err)
+		log.Printf("GetItem failed: %v", err)
+		return nil, err
 	}
 
 	err = dynamodbattribute.UnmarshalMap(result.Item, &item)
 	if err != nil {
-		fmt.Printf("Failed to unmarshal record, %v\n", err)
-		return nil, fmt.Errorf("GetItem failed: Failed to unmarshal record, %v", err)
+		log.Printf("GetItem failed: %v", err)
+		return nil, err
 	}
 
 	return item, nil
@@ -179,7 +176,12 @@ func GetItem(svc *dynamodb.DynamoDB, q *Query, t *Table, item interface{}) (inte
 // Query object with the UpdateValue defined in the Query.
 func UpdateItem(svc *dynamodb.DynamoDB, q *Query, t *Table) error {
 	exprMap := make(map[string]*dynamodb.AttributeValue)
-	exprMap[":u"] = createAV(q.UpdateValue)
+	av, err := marshal(q.UpdateValue)
+	if err != nil {
+		log.Printf("UpdateItem failed: %v", err.Error())
+		return err
+	}
+	exprMap[":u"] = av
 	input := &dynamodb.UpdateItemInput{
 		ExpressionAttributeValues: exprMap,
 		TableName:                 aws.String(t.TableName),
@@ -188,13 +190,13 @@ func UpdateItem(svc *dynamodb.DynamoDB, q *Query, t *Table) error {
 		UpdateExpression:          aws.String(fmt.Sprintf("set %s = :u", q.UpdateFieldName)),
 	}
 
-	_, err := svc.UpdateItem(input)
+	_, err = svc.UpdateItem(input)
 	if err != nil {
-		fmt.Println(err.Error())
-		return fmt.Errorf("UpdateItem failed: %v", err)
+		log.Printf("UpdateItem failed: %v", err.Error())
+		return err
 	}
 
-	fmt.Printf("Updated %v: %v: %s = %v\n", q.PrimaryValue, q.SortValue, q.UpdateFieldName, q.UpdateValue)
+	log.Printf("Updated %v: %v: %s = %v\n", q.PrimaryValue, q.SortValue, q.UpdateFieldName, q.UpdateValue)
 	return nil
 }
 
@@ -221,12 +223,11 @@ func DeleteItem(svc *dynamodb.DynamoDB, q *Query, t *Table) error {
 
 	_, err := svc.DeleteItem(input)
 	if err != nil {
-		fmt.Println("Got error calling DeleteItem")
-		fmt.Println(err.Error())
-		return fmt.Errorf("DeleteItem failed: %v", err)
+		log.Printf("DeleteItem failed: %v", err)
+		return err
 	}
 
-	fmt.Printf("Deleted %s: %s from table %s\n", q.PrimaryValue, q.SortValue, t.TableName)
+	log.Printf("Deleted %s: %s from table %s\n", q.PrimaryValue, q.SortValue, t.TableName)
 	return nil
 }
 
@@ -509,4 +510,23 @@ func batchGetUtil(svc *dynamodb.DynamoDB, input *dynamodb.BatchGetItemInput) (*d
 		}
 	}
 	return result, err
+}
+
+func marshal(input interface{}) (*dynamodb.AttributeValue, error) {
+	marshal, err := dynamodbattribute.Marshal(input)
+	if err != nil {
+		log.Printf("marshal failed: %v", err)
+		return nil, err
+	}
+	return marshal, nil
+}
+
+// marshalMap marshals an interface object into an AttributeValue map
+func marshalMap(input interface{}) (map[string]*dynamodb.AttributeValue, error) {
+	marshal, err := dynamodbattribute.MarshalMap(input)
+	if err != nil {
+		log.Printf("marshalMap failed: %v", err)
+		return nil, err
+	}
+	return marshal, nil
 }
