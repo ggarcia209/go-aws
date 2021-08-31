@@ -11,6 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 )
 
+const ErrConditionalCheck = "ERR_CONDITIONAL_CHECK"
+
 // Table represents a table and holds basic information about it.
 // This object is used to access the Dynamo Table requested for each CRUD op.
 type Table struct {
@@ -56,6 +58,7 @@ type Query struct {
 	PrimaryValue    interface{}
 	SortValue       interface{}
 	UpdateFieldName string
+	UpdateExprKey   string
 	UpdateValue     interface{}
 }
 
@@ -69,12 +72,12 @@ func (q *Query) UpdateCurrent(fieldName string, value interface{}) {
 
 // UpdateNew selects a new item for an update.
 func (q *Query) UpdateNew(pv, sv, fieldName string, value interface{}) {
-	q.PrimaryValue, q.SortValue, q.UpdateValue, q.UpdateFieldName = pv, sv, value, fieldName
+	q.PrimaryValue, q.SortValue, q.UpdateFieldName, q.UpdateValue = pv, sv, fieldName, value
 }
 
 // Reset clears all fields.
 func (q *Query) Reset() {
-	q.PrimaryValue, q.SortValue, q.UpdateValue, q.UpdateFieldName = nil, nil, nil, ""
+	q.PrimaryValue, q.SortValue, q.UpdateValue, q.UpdateExprKey, q.UpdateFieldName = nil, nil, nil, "", ""
 }
 
 // CreateNewTableObj creates a new Table struct.

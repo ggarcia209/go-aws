@@ -4,6 +4,10 @@
 // This file contains CRUD operations for working with DynamoDB.
 package dynamo
 
+/* TO DO:
+- add expression logic to Create, Read, Delete operations
+*/
+
 import (
 	"fmt"
 	"log"
@@ -174,24 +178,34 @@ func GetItem(svc *dynamodb.DynamoDB, q *Query, t *Table, item interface{}) (inte
 
 // UpdateItem updates the specified item's attribute defined in the
 // Query object with the UpdateValue defined in the Query.
-func UpdateItem(svc *dynamodb.DynamoDB, q *Query, t *Table) error {
-	exprMap := make(map[string]*dynamodb.AttributeValue)
-	av, err := marshal(q.UpdateValue)
-	if err != nil {
-		log.Printf("UpdateItem failed: %v", err.Error())
-		return err
-	}
-	exprMap[":u"] = av
+func UpdateItem(svc *dynamodb.DynamoDB, q *Query, t *Table, expr Expression) error {
 	input := &dynamodb.UpdateItemInput{
-		ExpressionAttributeValues: exprMap,
+		ExpressionAttributeNames:  expr.Names(),
+		ExpressionAttributeValues: expr.Values(),
 		TableName:                 aws.String(t.TableName),
 		Key:                       keyMaker(q, t),
 		ReturnValues:              aws.String("UPDATED_NEW"),
-		UpdateExpression:          aws.String(fmt.Sprintf("set %s = :u", q.UpdateFieldName)),
+		UpdateExpression:          expr.Update(),
+	}
+	if expr.Condition() != nil {
+		input.ConditionExpression = expr.Condition()
+	}
+	if expr.Filter() != nil {
+		input.ConditionExpression = expr.Filter()
+	}
+	if expr.KeyCondition() != nil {
+		input.ConditionExpression = expr.KeyCondition()
+	}
+	if expr.Projection() != nil {
+		input.ConditionExpression = expr.Projection()
 	}
 
-	_, err = svc.UpdateItem(input)
+	_, err := svc.UpdateItem(input)
 	if err != nil {
+		if err.(awserr.Error).Code() == dynamodb.ErrCodeConditionalCheckFailedException {
+			log.Println("UpdateItem failed: Conditional check failed")
+			return fmt.Errorf(ErrConditionalCheck)
+		}
 		log.Printf("UpdateItem failed: %v", err.Error())
 		return err
 	}
