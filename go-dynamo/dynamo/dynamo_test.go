@@ -6,6 +6,7 @@ import (
 )
 
 const TableName = "go-dynamo-test"
+const buildTreeErrProjection = "buildTree error: unset parameter: ProjectionBuilder"
 
 var svc = InitSesh()
 
@@ -23,6 +24,7 @@ type record struct {
 	Partition string          `json:"partition"`
 	UUID      string          `json:"uuid"`
 	Count     int             `json:"count"`
+	CountMap  map[string]int  `json:"count-map"`
 	Price     float32         `json:"price"`
 	Set       map[string]bool `json:"set"`
 }
@@ -94,16 +96,69 @@ func TestGetItem(t *testing.T) {
 		{pk: "B", sk: "003", model: &record{}, wantUuid: "003", wantErr: nil},
 		{pk: "C", sk: "004", model: &record{}, wantUuid: "004", wantErr: nil},
 	}
+	expr := NewExpression()
 
 	for _, test := range tests {
 		q := CreateNewQueryObj(test.pk, test.sk)
-		item, err := GetItem(dbInfo.Svc, q, dbInfo.Tables[TableName], test.model)
+		item, err := GetItem(dbInfo.Svc, q, dbInfo.Tables[TableName], test.model, expr)
 		if err != test.wantErr {
 			t.Errorf("FAIL: %v; want: %v", err, test.wantErr)
 		}
 		if item.(*record).UUID != test.wantUuid {
 			t.Errorf("FAIL - DATA: %v; want: %v", item.(*record).UUID, test.wantUuid)
 		}
+	}
+}
+
+func TestGetItemWithProjection(t *testing.T) {
+	var tests = []struct {
+		pk         string
+		sk         string
+		attributes []string
+		size       string
+		wantErr    error
+	}{
+		{pk: "A", sk: "001", attributes: []string{"count"}, size: "", wantErr: nil},                         // top-level value
+		{pk: "B", sk: "003", attributes: []string{"count-map"}, size: "XL", wantErr: nil},                   // nested value - original count: 6
+		{pk: "A", sk: "001", attributes: []string{"count", "price"}, size: "", wantErr: nil},                // multiple attributes
+		{pk: "A", sk: "001", attributes: []string{}, size: "", wantErr: fmt.Errorf(buildTreeErrProjection)}, // no attributes specified
+		{pk: "A", sk: "001", attributes: []string{"quantity"}, size: "", wantErr: nil},                      // non existent attribute
+	}
+
+	dbInfo.SetSvc(svc)
+	dbInfo.AddTable(table)
+
+	for i, test := range tests {
+		names := []string{}
+		for _, name := range test.attributes {
+			if name == "count-map" {
+				name = fmt.Sprintf("%s.%s", name, test.size)
+			}
+			names = append(names, name)
+		}
+
+		q := CreateNewQueryObj(test.pk, test.sk)
+
+		eb := NewExprBuilder()
+		eb.SetProjection(names)
+		expr, err := eb.BuildExpression()
+		if err != nil {
+			if test.wantErr == nil {
+				t.Errorf("FAIL: %v", err)
+				continue
+			}
+			if err.Error() != test.wantErr.Error() {
+				t.Errorf("FAIL: %v; want: %v", err, test.wantErr)
+				continue
+			}
+		}
+
+		check, err := GetItem(dbInfo.Svc, q, dbInfo.Tables[TableName], &record{}, expr)
+		if err != nil {
+			t.Errorf("FAIL: %v", err)
+			continue
+		}
+		t.Logf("%d) check: %v", i, check)
 	}
 }
 
@@ -151,13 +206,15 @@ func TestUpdateWithCondition(t *testing.T) {
 		eb := NewExprBuilder()
 		eb.SetCondition(cond)
 		eb.SetUpdate(ud)
-		expr, err := eb.BuildExpresssion()
+		expr, err := eb.BuildExpression()
 		if err != nil {
 			t.Errorf("FAIL %v", err)
-			return
 		}
 
 		err = UpdateItem(dbInfo.Svc, q, dbInfo.Tables[TableName], expr)
+		if err != nil && test.wantErr == nil {
+			t.Errorf("FAIL: %v; want: %v", err, test.wantErr)
+		}
 		if err != nil && test.wantErr != nil {
 			if err.Error() != test.wantErr.Error() {
 				t.Errorf("FAIL: %v; want: %v", err, test.wantErr)

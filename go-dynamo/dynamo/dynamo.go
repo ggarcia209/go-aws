@@ -156,12 +156,18 @@ func CreateItem(svc *dynamodb.DynamoDB, item interface{}, table *Table) error {
 // GetItem reads an item from the database.
 // Returns Attribute Value map interface (map[stirng]interface{}) if object found.
 // Returns interface of type item if object not found.
-func GetItem(svc *dynamodb.DynamoDB, q *Query, t *Table, item interface{}) (interface{}, error) {
+func GetItem(svc *dynamodb.DynamoDB, q *Query, t *Table, item interface{}, expr Expression) (interface{}, error) {
 	key := keyMaker(q, t)
-	result, err := svc.GetItem(&dynamodb.GetItemInput{
+	input := &dynamodb.GetItemInput{
 		TableName: aws.String(t.TableName),
 		Key:       key,
-	})
+	}
+	if expr.Projection() != nil {
+		input.ExpressionAttributeNames = expr.Names()
+		input.ProjectionExpression = expr.Projection()
+	}
+
+	result, err := svc.GetItem(input)
 	if err != nil {
 		log.Printf("GetItem failed: %v", err)
 		return nil, err
@@ -386,7 +392,7 @@ func BatchWriteDelete(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, queries 
 // refObjs must be non-nil pointers of the same type,
 // 1 for each query/object returned.
 //   - Returns err if len(queries) != len(refObjs).
-func BatchGet(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, queries []*Query, refObjs []interface{}) ([]interface{}, error) {
+func BatchGet(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, queries []*Query, refObjs []interface{}, expr Expression) ([]interface{}, error) {
 	if len(queries) > 100 {
 		return nil, fmt.Errorf("too many items to process")
 	}
@@ -497,6 +503,39 @@ func batchWriteUtil(svc *dynamodb.DynamoDB, input *dynamodb.BatchWriteItemInput)
 		}
 	}
 	return result, err
+}
+
+// ScanItems scans the given Table for items matching the given expression parameters
+func ScanItems(svc *dynamodb.DynamoDB, t *Table, model interface{}, expr Expression) ([]interface{}, error) {
+	items := []interface{}{}
+
+	// Build the query input parameters
+	input := &dynamodb.ScanInput{
+		ExpressionAttributeNames:  expr.Names(),
+		ExpressionAttributeValues: expr.Values(),
+		FilterExpression:          expr.Filter(),
+		ProjectionExpression:      expr.Projection(),
+		TableName:                 aws.String(t.TableName),
+	}
+
+	// Make the DynamoDB Query API call
+	result, err := svc.Scan(input)
+	if err != nil {
+		log.Printf("ScanItems failed: %v", err)
+		return items, err
+	}
+
+	for _, res := range result.Items {
+		item := model
+		err = dynamodbattribute.UnmarshalMap(res, &item)
+		if err != nil {
+			log.Printf("ScanItems failed: %v", err)
+			return []interface{}{}, err
+		}
+		items = append(items, item)
+	}
+
+	return items, nil
 }
 
 func batchGetUtil(svc *dynamodb.DynamoDB, input *dynamodb.BatchGetItemInput) (*dynamodb.BatchGetItemOutput, error) {

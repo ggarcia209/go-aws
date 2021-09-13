@@ -80,7 +80,7 @@ func (e *ExprBuilder) SetKeyCondition(name string, value interface{}) {}
 func (e *ExprBuilder) SetProjection(names []string) {
 	proj := expression.ProjectionBuilder{}
 	for _, name := range names {
-		proj.AddNames(expression.Name(name))
+		proj = proj.AddNames(expression.Name(name))
 	}
 	e.Projection = &proj
 }
@@ -91,12 +91,11 @@ func (e *ExprBuilder) SetUpdate(update UpdateExpr) {
 }
 
 // BuildExpression builds the expression from the ExprBuilder fields and returns the object.
-func (e *ExprBuilder) BuildExpresssion() (Expression, error) {
+func (e *ExprBuilder) BuildExpression() (Expression, error) {
 	expr := NewExpression()
 	eb := expression.NewBuilder()
 
 	if e.Condition != nil {
-		log.Printf("with condition: %v", e.Condition)
 		eb = eb.WithCondition(*e.Condition)
 	}
 	if e.Filter != nil {

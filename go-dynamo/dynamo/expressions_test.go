@@ -40,7 +40,7 @@ func TestExpressionBuild(t *testing.T) {
 		eb := NewExprBuilder()
 		eb.SetCondition(cond)
 		eb.SetUpdate(ud)
-		expr, err := eb.BuildExpresssion()
+		expr, err := eb.BuildExpression()
 		if err != nil {
 			t.Errorf("FAIL %v", err)
 			return
