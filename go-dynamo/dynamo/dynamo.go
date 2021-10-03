@@ -505,9 +505,15 @@ func batchWriteUtil(svc *dynamodb.DynamoDB, input *dynamodb.BatchWriteItemInput)
 	return result, err
 }
 
-// ScanItems scans the given Table for items matching the given expression parameters
-func ScanItems(svc *dynamodb.DynamoDB, t *Table, model interface{}, expr Expression) ([]interface{}, error) {
+// ScanItems scans the given Table for items matching the given expression parameters.
+func ScanItems(svc *dynamodb.DynamoDB, t *Table, model interface{}, startKey interface{}, expr Expression) ([]interface{}, error) {
 	items := []interface{}{}
+
+	av, err := dynamodbattribute.MarshalMap(startKey)
+	if err != nil {
+		log.Printf("ScanItems failed: %v", err)
+		return items, err
+	}
 
 	// Build the query input parameters
 	input := &dynamodb.ScanInput{
@@ -518,12 +524,18 @@ func ScanItems(svc *dynamodb.DynamoDB, t *Table, model interface{}, expr Express
 		TableName:                 aws.String(t.TableName),
 	}
 
+	if startKey != nil {
+		input.ExclusiveStartKey = av
+	}
+
 	// Make the DynamoDB Query API call
 	result, err := svc.Scan(input)
 	if err != nil {
 		log.Printf("ScanItems failed: %v", err)
 		return items, err
 	}
+
+	// ADD LOGIC FOR HANDLING PAGINATION
 
 	for _, res := range result.Items {
 		item := model
