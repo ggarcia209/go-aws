@@ -15,7 +15,7 @@ var table = &Table{
 	PrimaryKeyName: "partition",
 	PrimaryKeyType: "string",
 	SortKeyName:    "uuid",
-	SortKeyType:    "type",
+	SortKeyType:    "string",
 }
 
 var dbInfo = InitDbInfo()
