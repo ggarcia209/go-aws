@@ -21,6 +21,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 )
 
+const ErrRequestThrottled = "ERR_REQUEST_THROTTLED"
+
 // InitSesh initializes a new session with default config/credentials.
 func InitSesh() *dynamodb.DynamoDB {
 	// Initialize a session that the SDK will use to load
@@ -211,6 +213,10 @@ func UpdateItem(svc *dynamodb.DynamoDB, q *Query, t *Table, expr Expression) err
 		if err.(awserr.Error).Code() == dynamodb.ErrCodeConditionalCheckFailedException {
 			log.Println("UpdateItem failed: Conditional check failed")
 			return fmt.Errorf(ErrConditionalCheck)
+		}
+		if err.(awserr.Error).Code() == dynamodb.ErrCodeProvisionedThroughputExceededException {
+			log.Println("UpdateItem failed: Item throttled")
+			return fmt.Errorf(ErrRequestThrottled)
 		}
 		log.Printf("UpdateItem failed: %v", err.Error())
 		return err
