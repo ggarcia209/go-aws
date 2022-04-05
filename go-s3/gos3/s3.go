@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/ggarcia209/go-aws/goaws"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -33,6 +34,15 @@ func InitSesh() interface{} {
 
 	// Create SNS client
 	svc := s3.New(sesh)
+
+	log.Println("S3 client initialized")
+
+	return svc
+}
+
+func NewS3Client(session goaws.Session) interface{} {
+	// Create SNS client
+	svc := s3.New(session.GetSession())
 
 	log.Println("S3 client initialized")
 
