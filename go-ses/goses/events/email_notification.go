@@ -16,16 +16,16 @@ type EmailNotification struct {
 }
 
 type Mail struct {
-	Timestamp        string              `json:"timestamp"`
-	Source           string              `json:"source"`
-	SourceArn        string              `json:"sourceArn"`
-	SendingAcctId    string              `json:"sendingAccountId"`
-	MessageId        string              `json:"messageId"`
-	Destination      []string            `json:"destination"`
-	HeadersTruncated bool                `json:"headersTruncated"`
-	Headers          []header            `json:"headers"`
-	CommonHeaders    []header            `json:"commonHeaders"`
-	Tags             map[string][]string `json:"tags"`
+	Timestamp        string                 `json:"timestamp"`
+	Source           string                 `json:"source"`
+	SourceArn        string                 `json:"sourceArn"`
+	SendingAcctId    string                 `json:"sendingAccountId"`
+	MessageId        string                 `json:"messageId"`
+	Destination      []string               `json:"destination"`
+	HeadersTruncated bool                   `json:"headersTruncated"`
+	Headers          []header               `json:"headers"`
+	CommonHeaders    map[string]interface{} `json:"commonHeaders"`
+	Tags             map[string][]string    `json:"tags"`
 }
 
 // requires the Value type to be known by the caller
