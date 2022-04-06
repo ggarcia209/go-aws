@@ -2,7 +2,7 @@ package events
 
 // EmailNotification wraps the SES Event data type.
 type EmailNotification struct {
-	NotificationType string           `json:"notification_type"`
+	NotificationType string           `json:"notificationType"`
 	Bounce           Bounce           `json:"bounce"`
 	Complaint        Complaint        `json:"complaint"`
 	Delivery         Delivery         `json:"delivery"`
