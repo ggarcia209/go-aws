@@ -137,6 +137,81 @@ func SendEmail(svc interface{}, to, cc, replyTo []string, from, subject, textBod
 	return nil
 }
 
+// SendEmailWithConfigSet sends a new email message with a configuration set option. To and CC addresses are passed as []string, all other fields as strings.
+func SendEmailWithConfigSet(
+	svc interface{},
+	to, cc, replyTo []string,
+	from, subject, textBody, htmlBody, configSetName string,
+) error {
+	ccAddr, toAddr, replyToAddr := []*string{}, []*string{}, []*string{}
+	for _, addr := range to {
+		a := aws.String(addr)
+		toAddr = append(toAddr, a)
+	}
+	for _, addr := range cc {
+		a := aws.String(addr)
+		ccAddr = append(ccAddr, a)
+	}
+	for _, addr := range replyTo {
+		a := aws.String(addr)
+		replyToAddr = append(replyToAddr, a)
+	}
+
+	// Assemble the email.
+	input := &ses.SendEmailInput{
+		Destination: &ses.Destination{
+			CcAddresses: ccAddr,
+			ToAddresses: toAddr,
+		},
+		Message: &ses.Message{
+			Body: &ses.Body{
+				Html: &ses.Content{
+					Charset: aws.String(CharSet),
+					Data:    aws.String(htmlBody),
+				},
+				Text: &ses.Content{
+					Charset: aws.String(CharSet),
+					Data:    aws.String(textBody),
+				},
+			},
+			Subject: &ses.Content{
+				Charset: aws.String(CharSet),
+				Data:    aws.String(subject),
+			},
+		},
+		ReplyToAddresses:     replyToAddr,
+		Source:               aws.String(from),
+		ConfigurationSetName: aws.String(configSetName),
+	}
+
+	// Attempt to send the email.
+	result, err := svc.(*ses.SES).SendEmail(input)
+
+	// Display error messages if they occur.
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case ses.ErrCodeMessageRejected:
+				log.Printf("SendEmail failed: %v: %v", ses.ErrCodeMessageRejected, aerr.Error())
+			case ses.ErrCodeMailFromDomainNotVerifiedException:
+				log.Printf("SendEmail failed: %v: %v", ses.ErrCodeMailFromDomainNotVerifiedException, aerr.Error())
+			case ses.ErrCodeConfigurationSetDoesNotExistException:
+				log.Printf("SendEmail failed: %v: %v", ses.ErrCodeConfigurationSetDoesNotExistException, aerr.Error())
+			default:
+				log.Printf("SendEmail failed: %v", aerr.Error())
+			}
+		} else {
+			// Print the error, cast err to awserr.Error to get the Code and
+			// Message from an error.
+			log.Printf("SendEmail failed: %v", err.Error())
+		}
+
+		return err
+	}
+	log.Printf("result: %v", result) // test only
+	return nil
+}
+
 // SendEmail sends a new email message. To and CC addresses are passed as []string, all other fields as strings.
 func SendPlainTextEmail(svc interface{}, to, cc, replyTo []string, from, subject, textBody string) error {
 	ccAddr, toAddr, replyToAddr := []*string{}, []*string{}, []*string{}
