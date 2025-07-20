@@ -9,6 +9,7 @@ package dynamo
 */
 
 import (
+	"errors"
 	"fmt"
 	"log"
 
@@ -136,8 +137,7 @@ func CreateTable(svc *dynamodb.DynamoDB, table *Table) error {
 func CreateItem(svc *dynamodb.DynamoDB, item interface{}, table *Table) error {
 	av, err := dynamodbattribute.MarshalMap(item)
 	if err != nil {
-		log.Printf("CreateItem failed: Got error marshalling new movie item: %v", err)
-		return err
+		return fmt.Errorf("dynamodbattribute.MarshalMap: %w", err)
 	}
 
 	input := &dynamodb.PutItemInput{
@@ -147,11 +147,9 @@ func CreateItem(svc *dynamodb.DynamoDB, item interface{}, table *Table) error {
 
 	_, err = svc.PutItem(input)
 	if err != nil {
-		log.Printf("CreateItem failed: %v", err)
-		return err
+		return fmt.Errorf("svc.PutItem: %w", err)
 	}
 
-	log.Printf("Successfully added item to table %s\n", table.TableName)
 	return nil
 }
 
@@ -171,14 +169,12 @@ func GetItem(svc *dynamodb.DynamoDB, q *Query, t *Table, item interface{}, expr 
 
 	result, err := svc.GetItem(input)
 	if err != nil {
-		log.Printf("GetItem failed: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("svc.GetItem: %w", err)
 	}
 
 	err = dynamodbattribute.UnmarshalMap(result.Item, &item)
 	if err != nil {
-		log.Printf("GetItem failed: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("dynamodbattribute.UnmarshalMap: %w", err)
 	}
 
 	return item, nil
@@ -211,18 +207,14 @@ func UpdateItem(svc *dynamodb.DynamoDB, q *Query, t *Table, expr Expression) err
 	_, err := svc.UpdateItem(input)
 	if err != nil {
 		if err.(awserr.Error).Code() == dynamodb.ErrCodeConditionalCheckFailedException {
-			log.Println("UpdateItem failed: Conditional check failed")
-			return fmt.Errorf(ErrConditionalCheck)
+			return errors.New(ErrConditionalCheck)
 		}
 		if err.(awserr.Error).Code() == dynamodb.ErrCodeProvisionedThroughputExceededException {
-			log.Println("UpdateItem failed: Item throttled")
-			return fmt.Errorf(ErrRequestThrottled)
+			return errors.New(ErrRequestThrottled)
 		}
-		log.Printf("UpdateItem failed: %v", err.Error())
 		return err
 	}
 
-	log.Printf("Updated %v: %v: %s = %v\n", q.PrimaryValue, q.SortValue, q.UpdateFieldName, q.UpdateValue)
 	return nil
 }
 
@@ -512,14 +504,15 @@ func batchWriteUtil(svc *dynamodb.DynamoDB, input *dynamodb.BatchWriteItemInput)
 }
 
 // ScanItems scans the given Table for items matching the given expression parameters.
-func ScanItems(svc *dynamodb.DynamoDB, t *Table, model interface{}, startKey interface{}, expr Expression) ([]interface{}, error) {
+func ScanItems(
+	svc *dynamodb.DynamoDB,
+	t *Table,
+	model interface{},
+	startKey interface{},
+	expr Expression,
+	perPage *int64,
+) ([]interface{}, error) {
 	items := []interface{}{}
-
-	av, err := dynamodbattribute.MarshalMap(startKey)
-	if err != nil {
-		log.Printf("ScanItems failed: %v", err)
-		return items, err
-	}
 
 	// Build the query input parameters
 	input := &dynamodb.ScanInput{
@@ -528,29 +521,40 @@ func ScanItems(svc *dynamodb.DynamoDB, t *Table, model interface{}, startKey int
 		FilterExpression:          expr.Filter(),
 		ProjectionExpression:      expr.Projection(),
 		TableName:                 aws.String(t.TableName),
+		Limit:                     perPage,
 	}
 
 	if startKey != nil {
+		av, err := dynamodbattribute.MarshalMap(startKey)
+		if err != nil {
+			return items, fmt.Errorf("dynamodbattribute.MarshalMap: %w", err)
+		}
 		input.ExclusiveStartKey = av
 	}
 
-	// Make the DynamoDB Query API call
-	result, err := svc.Scan(input)
-	if err != nil {
-		log.Printf("ScanItems failed: %v", err)
-		return items, err
-	}
-
-	// ADD LOGIC FOR HANDLING PAGINATION
-
-	for _, res := range result.Items {
-		item := model
-		err = dynamodbattribute.UnmarshalMap(res, &item)
+	for {
+		// Make the DynamoDB Query API call
+		result, err := svc.Scan(input)
 		if err != nil {
-			log.Printf("ScanItems failed: %v", err)
-			return []interface{}{}, err
+			return items, err
 		}
-		items = append(items, item)
+
+		// get results
+		for _, res := range result.Items {
+			item := model
+			if err = dynamodbattribute.UnmarshalMap(res, &item); err != nil {
+				return nil, fmt.Errorf("dynamodbattribute.UnmarshalMap: %w", err)
+			}
+			items = append(items, item)
+		}
+
+		// all results scanned or single page specified
+		if result.LastEvaluatedKey == nil || startKey != nil {
+			break
+		}
+
+		// get next page
+		input.ExclusiveStartKey = result.LastEvaluatedKey
 	}
 
 	return items, nil
