@@ -7,7 +7,7 @@ package gos3
 // implement customizable retry logic
 
 import (
-	"fmt"
+	"errors"
 	"io"
 	"log"
 	"strings"
@@ -76,7 +76,7 @@ func GetObject(svc interface{}, bucket, key string) ([]byte, error) {
 		if awsErr, ok := err.(awserr.Error); ok {
 			log.Printf("code: %v", awsErr.Code())
 			if awsErr.Code() == "NoSuchKey" {
-				return []byte{}, fmt.Errorf(ErrNoSuchKey)
+				return []byte{}, errors.New(ErrNoSuchKey)
 			}
 		}
 		return []byte{}, err
