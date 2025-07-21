@@ -40,6 +40,14 @@ func InitSesh() interface{} {
 	return svc
 }
 
+func NewDownloader(sess goaws.Session) *s3manager.Downloader {
+	return s3manager.NewDownloader(sess.GetSession())
+}
+
+func NewUploader(sess goaws.Session) *s3manager.Uploader {
+	return s3manager.NewUploader(sess.GetSession())
+}
+
 func NewS3Client(session goaws.Session) interface{} {
 	// Create SNS client
 	svc := s3.New(session.GetSession())
