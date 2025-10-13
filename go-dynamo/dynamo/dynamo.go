@@ -9,7 +9,6 @@ package dynamo
 */
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
@@ -546,7 +545,7 @@ func (d *DynamoDB) batchWriteUtil(input *dynamodb.BatchWriteItemInput) (*dynamod
 }
 
 // ScanItems scans the given Table for items matching the given expression parameters.
-func (d *DynamoDB) ScanItems(tableName string, model interface{}, startKey interface{}, expr Expression) ([]interface{}, error) {
+func (d *DynamoDB) ScanItems(tableName string, model interface{}, startKey interface{}, expr Expression, perPage *int64) ([]interface{}, error) {
 	// get table
 	t := d.tables[tableName]
 	if t == nil {
@@ -554,11 +553,6 @@ func (d *DynamoDB) ScanItems(tableName string, model interface{}, startKey inter
 	}
 
 	items := []interface{}{}
-
-	av, err := dynamodbattribute.MarshalMap(startKey)
-	if err != nil {
-		return items, fmt.Errorf("dynamodbattribute.MarshalMap: %w", err)
-	}
 
 	// Build the query input parameters
 	input := &dynamodb.ScanInput{
@@ -584,14 +578,14 @@ func (d *DynamoDB) ScanItems(tableName string, model interface{}, startKey inter
 		return items, fmt.Errorf("d.svc.Scan: %w", err)
 	}
 
-		// get results
-		for _, res := range result.Items {
-			item := model
-			if err = dynamodbattribute.UnmarshalMap(res, &item); err != nil {
-				return nil, fmt.Errorf("dynamodbattribute.UnmarshalMap: %w", err)
-			}
-			items = append(items, item)
+	// get results
+	for _, res := range result.Items {
+		item := model
+		if err = dynamodbattribute.UnmarshalMap(res, &item); err != nil {
+			return nil, fmt.Errorf("dynamodbattribute.UnmarshalMap: %w", err)
 		}
+		items = append(items, item)
+	}
 
 	for _, res := range result.Items {
 		item := model
