@@ -3,9 +3,8 @@ package goaws
 // TO DO: add error handling for credentials not found
 
 import (
-	"log"
-
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 )
 
@@ -25,7 +24,6 @@ func NewDefaultSession() Session {
 	s := session.Must(session.NewSessionWithOptions(session.Options{
 		SharedConfigState: session.SharedConfigEnable,
 	}))
-	log.Printf("region: %v", aws.StringValue(s.Config.Region))
 
 	sesh := Session{session: s}
 
@@ -40,8 +38,22 @@ func NewSessionWithProfile(profile string) Session {
 	s := session.Must(session.NewSessionWithOptions(session.Options{
 		SharedConfigState: session.SharedConfigEnable,
 		Profile:           profile,
+		Config:            aws.Config{},
 	}))
-	log.Printf("region: %v", aws.StringValue(s.Config.Region))
+
+	sesh := Session{session: s}
+
+	return sesh
+}
+
+// NewSessionFromEnv uses AWS_ env vars to initialize the session
+func NewSessionFromEnv(profile string) Session {
+	s := session.Must(session.NewSessionWithOptions(session.Options{
+		SharedConfigState: session.SharedConfigDisable,
+		Config: aws.Config{
+			Credentials: credentials.NewEnvCredentials(),
+		},
+	}))
 
 	sesh := Session{session: s}
 
