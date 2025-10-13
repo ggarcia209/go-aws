@@ -2,12 +2,11 @@ package gosqs
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/ggarcia209/go-aws/goaws"
 )
 
 const ErrAWSNonExistentQueue = "AWS.SimpleQueueService.NonExistentQueue"
@@ -52,37 +51,32 @@ type QueueOptions struct {
 // QueueTags is a map object that enables tags when creating a new queue with CreateQueue()
 type QueueTags map[string]*string
 
+type SqsQueuesLogic interface {
+	CreateQueue(name string, options QueueOptions, tags map[string]*string) (string, error)
+	GetQueueURL(name string) (string, error)
+	DeleteQueue(url string) error
+	PurgeQueue(url string)
+}
+
+type SqsQueues struct {
+	svc *sqs.SQS
+}
+
+func NewSqsQueues(sess goaws.Session) *SqsQueues {
+	return &SqsQueues{
+		svc: sqs.New(sess.GetSession()),
+	}
+}
+
 // InitSesh initializes a new session with default config/credentials.
 // Returns the *sqs.SQS object as interface{} type. The *sqs.SQS type is
 // asserted when passed to the methods in the gosqs package.
-func InitSesh() interface{} {
-	// Initialize a session that the SDK will use to load
-	// credentials from the shared credentials file ~/.aws/credentials
-	sesh := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
-
-	// fmt.Println("session intialized")
-	// fmt.Println("region: ", aws.StringValue(sesh.Config.Region))
-	log.Printf("region: %v", aws.StringValue(sesh.Config.Region))
-
-	// Create DynamoDB client
-	svc := sqs.New(sesh)
-
-	// fmt.Println("SQS client initialized")
-	// fmt.Println()
-
-	return svc
+func InitSesh(sess goaws.Session) *sqs.SQS {
+	return sqs.New(sess.GetSession())
 }
 
 // CreateQueue creates a new SQS queue per the given name, options, & tags arguments and returns the url of the queue and/or error
-func CreateQueue(svc interface{}, name string, options QueueOptions, tags map[string]*string) (string, error) {
-	_, ok := svc.(*sqs.SQS)
-	if !ok {
-		err := fmt.Errorf("INVALID_SVC_ARG_TYPE")
-		log.Printf("CreateQueue failed: %v", err)
-		return "", err
-	}
+func (s *SqsQueues) CreateQueue(name string, options QueueOptions, tags map[string]*string) (string, error) {
 	url := ""
 	input := &sqs.CreateQueueInput{
 		QueueName: &name,
@@ -109,76 +103,49 @@ func CreateQueue(svc interface{}, name string, options QueueOptions, tags map[st
 	if len(tags) > 0 {
 		input.Tags = tags
 	}
-	result, err := svc.(*sqs.SQS).CreateQueue(input)
+	result, err := s.svc.CreateQueue(input)
 	if err != nil {
-		log.Printf("CreateQueue failed: %v", err.Error())
-		return url, err
+		return url, fmt.Errorf("s.svc.CreateQueue: %w", err)
 	}
 
 	url = *result.QueueUrl
-	log.Print("CreateQueue succeeded: ", url)
 	return url, nil
 }
 
 // GetQueueURL retrives the URL for the given queue name
-func GetQueueURL(svc interface{}, name string) (string, error) {
-	_, ok := svc.(*sqs.SQS)
-	if !ok {
-		err := fmt.Errorf("INVALID_SVC_ARG_TYPE")
-		log.Printf("GetQueueURL failed: %v", err)
-		return "", err
-	}
-	result, err := svc.(*sqs.SQS).GetQueueUrl(&sqs.GetQueueUrlInput{
+func (s *SqsQueues) GetQueueURL(name string) (string, error) {
+	result, err := s.svc.GetQueueUrl(&sqs.GetQueueUrlInput{
 		QueueName: &name,
 	})
 	if err != nil {
-		log.Printf("GetQueueURLfailed: %v", err.Error())
-		return "", err
+		return "", fmt.Errorf("s.svc.GetQueueUrl: %w", err)
 	}
 	return *result.QueueUrl, nil
 }
 
 // DeleteQueue deletes the queue at the given URL
-func DeleteQueue(svc interface{}, url string) error {
-	_, ok := svc.(*sqs.SQS)
-	if !ok {
-		err := fmt.Errorf("INVALID_SVC_ARG_TYPE")
-		log.Printf("DeleteQueue failed: %v", err)
-
-		return err
-	}
-	_, err := svc.(*sqs.SQS).DeleteQueue(&sqs.DeleteQueueInput{
+func (s *SqsQueues) DeleteQueue(url string) error {
+	if _, err := s.svc.DeleteQueue(&sqs.DeleteQueueInput{
 		QueueUrl: aws.String(url),
-	})
-	if err != nil {
+	}); err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
-			log.Printf("DeleteQueue failed: %v: %v", awsErr.Code(), awsErr.Message())
 			if awsErr.Code() == ErrAWSNonExistentQueue {
 				return fmt.Errorf(awsErr.Code())
 			}
-			return err
+			return fmt.Errorf("s.svc.DeleteQueue: %w", err)
 		}
-		log.Printf("DeleteQueue failed: %v", err.Error())
-		return err
+		return fmt.Errorf("s.svc.DeleteQueue: %w", err)
 	}
 
 	return nil
 }
 
 // PurgeQueue purges the specified queue.
-func PurgeQueue(svc interface{}, url string) error {
-	_, ok := svc.(*sqs.SQS)
-	if !ok {
-		err := fmt.Errorf("INVALID_SVC_ARG_TYPE")
-		log.Printf("PurgeQueue failed: %v", err)
-		return err
-	}
-	_, err := svc.(*sqs.SQS).PurgeQueue(&sqs.PurgeQueueInput{
+func (s *SqsQueues) PurgeQueue(url string) error {
+	if _, err := s.svc.PurgeQueue(&sqs.PurgeQueueInput{
 		QueueUrl: aws.String(url),
-	})
-	if err != nil {
-		log.Printf("PurgeQueue failed: %v", err.Error())
-		return err
+	}); err != nil {
+		return fmt.Errorf("s.svc.PurgeQueue: %w", err)
 	}
 
 	return nil

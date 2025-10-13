@@ -3,6 +3,7 @@ package gosqs
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/ggarcia209/go-aws/goaws"
 )
 
 // error codes for invalid batch delete requests
@@ -207,16 +209,28 @@ func CreateMsgAttribute(key, dataType, value string) MsgAV {
 	return av
 }
 
+type SqsMessagesLogic interface {
+	SendMessage(options SendMsgOptions) (SendMsgResponse, error)
+	ReceiveMessage(options RecMsgOptions) ([]Message, error)
+	DeleteMessage(url, handle string) error
+	DeleteMessageBatch(req DeleteMessageBatchRequest) (DeleteMessageBatchResponse, error)
+	ChangeMessageVisibilityBatch(req BatchUpdateVisibilityTimeoutRequest) (BatchUpdateVisibilityTimeoutResponse, error)
+}
+
+type SqsMessages struct {
+	svc *sqs.SQS
+}
+
+func NewSqsMessages(sess goaws.Session) *SqsMessages {
+	return &SqsMessages{
+		svc: sqs.New(sess.GetSession()),
+	}
+}
+
 // SendMessage sends a new message to a queue per the options argument.
 // Unique MD5 checksums are generated for the MessageDeduplicationID
 // and MessageGroupID fields if not set for messages sent to FIFO Queues.
-func SendMessage(svc interface{}, options SendMsgOptions) (SendMsgResponse, error) {
-	_, ok := svc.(*sqs.SQS)
-	if !ok {
-		err := fmt.Errorf("INVALID_SVC_ARG_TYPE")
-		log.Printf("SendMessage failed: %v", err)
-		return SendMsgResponse{}, err
-	}
+func (s *SqsMessages) SendMessage(options SendMsgOptions) (SendMsgResponse, error) {
 	// ensure values are valid
 	if options.DelaySeconds < 0 {
 		options.DelaySeconds = 0
@@ -245,24 +259,18 @@ func SendMessage(svc interface{}, options SendMsgOptions) (SendMsgResponse, erro
 		}
 	}
 
-	out, err := svc.(*sqs.SQS).SendMessage(input)
+	out, err := s.svc.SendMessage(input)
 	if err != nil {
-		log.Printf("SendMessage failed: %v", err.Error())
-		return SendMsgResponse{}, err
+		return SendMsgResponse{}, fmt.Errorf("s.svc.SendMessage: %w", err)
 	}
 	resp := wrapSendMsgOutput(out)
 	return resp, nil
 }
 
 // ReceiveMessage receives a message from a queue per the options argument
-func ReceiveMessage(svc interface{}, options RecMsgOptions) ([]Message, error) {
+func (s *SqsMessages) ReceiveMessage(options RecMsgOptions) ([]Message, error) {
 	msgs := []Message{}
-	_, ok := svc.(*sqs.SQS)
-	if !ok {
-		err := fmt.Errorf("INVALID_SVC_ARG_TYPE")
-		log.Printf("ReceiveMessage failed: %v", err)
-		return msgs, err
-	}
+
 	// ensure values are valid
 	if options.MaxNumberOfMessages < 1 {
 		options.MaxNumberOfMessages = 1
@@ -287,7 +295,7 @@ func ReceiveMessage(svc interface{}, options RecMsgOptions) ([]Message, error) {
 		options.ReceiveRequestAttemptId = GenerateDedupeID(options.QueueURL)
 	}
 
-	msgResult, err := svc.(*sqs.SQS).ReceiveMessage(&sqs.ReceiveMessageInput{
+	msgResult, err := s.svc.ReceiveMessage(&sqs.ReceiveMessageInput{
 		AttributeNames:          options.AttributeNames,
 		MaxNumberOfMessages:     aws.Int64(options.MaxNumberOfMessages),
 		MessageAttributeNames:   options.MessageAttributeNames,
@@ -297,8 +305,7 @@ func ReceiveMessage(svc interface{}, options RecMsgOptions) ([]Message, error) {
 		WaitTimeSeconds:         aws.Int64(options.WaitTimeSeconds),
 	})
 	if err != nil {
-		log.Printf("ReceiveMessage failed: %v", err.Error())
-		return msgs, err
+		return msgs, fmt.Errorf("s.svc.ReceiveMessage: %w", err)
 	}
 	for _, msg := range msgResult.Messages {
 		conv := convertMessage(msg)
@@ -378,50 +385,33 @@ func GenerateDedupeID(msgBody string) string {
 
 // DeleteMessage deletes a message from the specified queue (by url) with the
 // given handle.
-func DeleteMessage(svc interface{}, url, handle string) error {
-	_, ok := svc.(*sqs.SQS)
-	if !ok {
-		err := fmt.Errorf("INVALID_SVC_ARG_TYPE")
-		log.Printf("DeleteMessage failed: %v", err)
-		return err
-	}
-	_, err := svc.(*sqs.SQS).DeleteMessage(&sqs.DeleteMessageInput{
+func (s *SqsMessages) DeleteMessage(url, handle string) error {
+	_, err := s.svc.DeleteMessage(&sqs.DeleteMessageInput{
 		QueueUrl:      aws.String(url),
 		ReceiptHandle: aws.String(handle),
 	})
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
-			log.Printf("DeleteMessage failed: %v: %v", awsErr.Code(), awsErr.Message())
 			if awsErr.Code() == ErrAWSInvalidParameter || awsErr.Code() == ErrAWSMissingParameter {
 				return fmt.Errorf(awsErr.Code())
 			}
-			return err
+			return fmt.Errorf("s.svc.DeleteMessage: %w", err)
 		}
-		log.Printf("DeleteMessage failed: %v", err)
-		return err
+		return fmt.Errorf("s.svc.DeleteMessage: %w", err)
 	}
 	return nil
 }
 
 // DeleteMessageBatch deletes a batch of messages
-func DeleteMessageBatch(svc interface{}, req DeleteMessageBatchRequest) (DeleteMessageBatchResponse, error) {
-	_, ok := svc.(*sqs.SQS)
-	if !ok {
-		err := fmt.Errorf("INVALID_SVC_ARG_TYPE")
-		log.Printf("DeleteMessageBatch failed: %v", err)
-		return DeleteMessageBatchResponse{}, err
-	}
+func (s *SqsMessages) DeleteMessageBatch(req DeleteMessageBatchRequest) (DeleteMessageBatchResponse, error) {
 	if len(req.ReceiptHandles) > 10 {
-		err := fmt.Errorf(ErrTooManyRequests)
-		return DeleteMessageBatchResponse{}, err
+		return DeleteMessageBatchResponse{}, errors.New(ErrTooManyRequests)
 	}
 	if len(req.MessageIDs) != len(req.ReceiptHandles) {
-		err := fmt.Errorf(ErrInvalidRequest)
-		return DeleteMessageBatchResponse{}, err
+		return DeleteMessageBatchResponse{}, errors.New(ErrInvalidRequest)
 	}
 	if req.QueueURL == "" {
-		err := fmt.Errorf(ErrInvalidQueueURL)
-		return DeleteMessageBatchResponse{}, err
+		return DeleteMessageBatchResponse{}, errors.New(ErrInvalidQueueURL)
 	}
 
 	handles := make(map[string]string)
@@ -439,14 +429,13 @@ func DeleteMessageBatch(svc interface{}, req DeleteMessageBatchRequest) (DeleteM
 		Entries:  entries,
 		QueueUrl: aws.String(req.QueueURL),
 	}
-	result, err := svc.(*sqs.SQS).DeleteMessageBatch(batchRequest)
+	result, err := s.svc.DeleteMessageBatch(batchRequest)
 	if err != nil {
 		wrap := wrapBatchDeleteOutput(result, handles)
-		log.Printf("DeleteMessageBatch failed: %v", err)
-		return wrap, err
+		return wrap, fmt.Errorf("s.svc.DeleteMessageBatch: %w", err)
 	}
 	wrap := wrapBatchDeleteOutput(result, handles)
-	return wrap, err
+	return wrap, nil
 }
 
 // wrap sqs.DeleteMessageBatchOutput object
@@ -483,14 +472,9 @@ func wrapBatchDeleteOutput(output *sqs.DeleteMessageBatchOutput, handles map[str
 // ChangeMessageVisibilityBatch updates the visibility timeout for a batch of messages
 // represented by the given MessageIds and ReceiptHandles. Assumes msgIDs[i] and handles[i] args
 // are in order and correspond to the same message.
-func ChangeMessageVisibilityBatch(svc interface{}, req BatchUpdateVisibilityTimeoutRequest) (BatchUpdateVisibilityTimeoutResponse, error) {
+func (s *SqsMessages) ChangeMessageVisibilityBatch(req BatchUpdateVisibilityTimeoutRequest) (BatchUpdateVisibilityTimeoutResponse, error) {
 	resp := BatchUpdateVisibilityTimeoutResponse{}
-	_, ok := svc.(*sqs.SQS)
-	if !ok {
-		err := fmt.Errorf("INVALID_SVC_ARG_TYPE")
-		log.Printf("ChangeMessageVisibilityBatch failed: %v", err)
-		return resp, err
-	}
+
 	if len(req.MessageIDs) != len(req.ReceiptHandles) {
 		log.Printf("ChangeMessageVisibilityBatch failed: Invalid request")
 		return resp, fmt.Errorf("INVALID_REQUEST")
@@ -515,10 +499,9 @@ func ChangeMessageVisibilityBatch(svc interface{}, req BatchUpdateVisibilityTime
 		entries = append(entries, entry)
 	}
 	input.Entries = entries
-	output, err := svc.(*sqs.SQS).ChangeMessageVisibilityBatch(input)
+	output, err := s.svc.ChangeMessageVisibilityBatch(input)
 	if err != nil {
-		log.Printf("ChangeMessageVisibilityBatch failed: %v", err)
-		return resp, err
+		return resp, fmt.Errorf("s.svc.ChangeMessageVisibilityBatch: %w", err)
 	}
 	resp = wrapBatchUpdateVisibilityTimeoutOutput(output)
 
