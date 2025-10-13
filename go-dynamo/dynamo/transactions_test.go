@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/ggarcia209/go-aws/goaws"
 )
 
 func TestNewTxItem(t *testing.T) {
@@ -118,6 +120,7 @@ func TestTxWriteCreate(t *testing.T) {
 	}
 
 	txInput := []TransactionItem{}
+	svc := NewDynamoDB(goaws.NewDefaultSession(), []*Table{table}, nil)
 
 	for _, test := range tests {
 		ti := NewCreateTxItem(test.n, test.i, test.t, test.q, test.e)
@@ -125,7 +128,7 @@ func TestTxWriteCreate(t *testing.T) {
 	}
 
 	tk := strconv.Itoa(int(rand.New(rand.NewSource(time.Now().UnixNano())).Uint64()))
-	failed, err := TxWrite(svc, txInput, tk)
+	failed, err := svc.TxWrite(txInput, tk)
 
 	if err != nil {
 		t.Errorf("FAIL: %v\n failed: %v", err, failed)
@@ -187,7 +190,7 @@ func TestTxWriteUpdate(t *testing.T) {
 	}
 
 	txInput := []TransactionItem{}
-
+	svc := NewDynamoDB(goaws.NewDefaultSession(), []*Table{table}, nil)
 	for _, test := range tests {
 		q, e := updateExpressionDec(test.i.Partition, test.i.UUID, test.i.Count)
 		ti := NewUpdateTxItem(test.n, table, q, e)
@@ -195,7 +198,7 @@ func TestTxWriteUpdate(t *testing.T) {
 	}
 
 	tk := strconv.Itoa(int(rand.New(rand.NewSource(time.Now().UnixNano())).Uint64()))
-	failed, err := TxWrite(svc, txInput, tk)
+	failed, err := svc.TxWrite(txInput, tk)
 
 	if err != nil {
 		t.Errorf("FAIL: %v\n failed: %v", err, failed)
@@ -256,7 +259,7 @@ func TestTxWriteCheckFail(t *testing.T) {
 	}
 
 	txInput := []TransactionItem{}
-
+	svc := NewDynamoDB(goaws.NewDefaultSession(), []*Table{table}, nil)
 	for _, test := range tests {
 		q, e := checkExpression(test.i.Partition, test.i.UUID, test.i.Count)
 		ti := NewConditionCheckTxItem(test.n, table, q, e)
@@ -264,7 +267,7 @@ func TestTxWriteCheckFail(t *testing.T) {
 	}
 
 	tk := strconv.Itoa(int(rand.New(rand.NewSource(time.Now().UnixNano())).Uint64()))
-	failed, err := TxWrite(svc, txInput, tk)
+	failed, err := svc.TxWrite(txInput, tk)
 
 	if err != nil {
 		if err.Error() != "TX_CONDITION_CHECK_FAILED" {
@@ -330,7 +333,7 @@ func TestTxWriteCheckPass(t *testing.T) {
 	}
 
 	txInput := []TransactionItem{}
-
+	svc := NewDynamoDB(goaws.NewDefaultSession(), []*Table{table}, nil)
 	for _, test := range tests {
 		q, e := checkExpression(test.i.Partition, test.i.UUID, test.i.Count)
 		ti := NewConditionCheckTxItem(test.n, table, q, e)
@@ -338,7 +341,7 @@ func TestTxWriteCheckPass(t *testing.T) {
 	}
 
 	tk := strconv.Itoa(int(rand.New(rand.NewSource(time.Now().UnixNano())).Uint64()))
-	failed, err := TxWrite(svc, txInput, tk)
+	failed, err := svc.TxWrite(txInput, tk)
 
 	if err != nil {
 		t.Errorf("FAIL: %v\n failed: %v", err, failed)

@@ -23,35 +23,6 @@ type Table struct {
 	SortKeyType    string
 }
 
-// DbInfo holds different variables to be passed to db operation functions
-// Contains the Db Svc, map of tables, and FailConfig.
-type DbInfo struct {
-	Svc        *dynamodb.DynamoDB
-	Tables     map[string]*Table
-	FailConfig *FailConfig
-}
-
-// SetSvc sets the Svc field of the DbInfo obj.
-func (d *DbInfo) SetSvc(svc *dynamodb.DynamoDB) {
-	d.Svc = svc
-}
-
-// SetFailConfig sets the FailConfig field of the DbInfo obj.
-func (d *DbInfo) SetFailConfig(fc *FailConfig) {
-	d.FailConfig = fc
-}
-
-// AddTable adds a new Table obj to the Tables field of the DbInfo obj.
-// TableName field is used for map key.
-func (d *DbInfo) AddTable(t *Table) {
-	d.Tables[t.TableName] = t
-}
-
-// InitDbInfo constructs a DbInfo object with default values.
-func InitDbInfo() *DbInfo {
-	return &DbInfo{Svc: nil, Tables: make(map[string]*Table), FailConfig: nil}
-}
-
 // Query holds the search values for both the Partition and Sort Keys.
 // Query also holds data for updating a specific item in the UpdateFieldName column.
 type Query struct {

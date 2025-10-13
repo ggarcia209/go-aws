@@ -7,11 +7,12 @@ import (
 )
 
 func TestListVerifiedIdentities(t *testing.T) {
-	svc := InitSesh()
-	err := ListVerifiedIdentities(svc)
+	svc := NewSES(goaws.NewDefaultSession())
+	ids, err := svc.ListVerifiedIdentities()
 	if err != nil {
 		t.Errorf("FAIL: %v", err)
 	}
+	t.Logf("ids: %v", ids)
 }
 
 func TestSendEmail(t *testing.T) {
@@ -27,9 +28,9 @@ func TestSendEmail(t *testing.T) {
 	}
 	subject := "SES TEST"
 	from := "dg.dev.test510@gmail.com"
-	svc := InitSesh()
+	svc := NewSES(goaws.NewDefaultSession())
 	for _, test := range tests {
-		err := SendEmail(svc, test.to, test.cc, test.replyTo, from, subject, test.textBody, test.htmlBody)
+		err := svc.SendEmail(test.to, test.cc, test.replyTo, from, subject, test.textBody, test.htmlBody)
 		if err != nil {
 			t.Errorf("FAIL: %v", err)
 		}
@@ -51,9 +52,8 @@ func TestSendEmailWithSession(t *testing.T) {
 	from := "dg.dev.test510@gmail.com"
 
 	for _, test := range tests {
-		sesh := goaws.NewDefaultSession()
-		svc := NewSESClient(sesh)
-		err := SendEmail(svc, test.to, test.cc, test.replyTo, from, subject, test.textBody, test.htmlBody)
+		svc := NewSES(goaws.NewDefaultSession())
+		err := svc.SendEmail(test.to, test.cc, test.replyTo, from, subject, test.textBody, test.htmlBody)
 		if err != nil {
 			t.Errorf("FAIL: %v", err)
 		}

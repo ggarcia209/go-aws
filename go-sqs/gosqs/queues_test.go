@@ -4,9 +4,8 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/ggarcia209/go-aws/goaws"
 )
-
-// var sqsTest = InitSesh()
 
 var noTags = map[string]*string{}
 var testTags = map[string]*string{
@@ -80,8 +79,9 @@ func TestCreateQueue(t *testing.T) {
 		{name: "test-002.fifo", options: fifoOptions1, tags: noTags},
 		// {name: "test-003.fifo", options: fifoOptions2, tags: testTags},
 	}
+	sqs := NewSqsQueues(goaws.NewDefaultSession())
 	for i, test := range tests {
-		url, err := CreateQueue(sqsTest, test.name, test.options, test.tags)
+		url, err := sqs.CreateQueue(test.name, test.options, test.tags)
 		if err != nil {
 			t.Errorf("test %d failed: %v", i, err)
 		}
@@ -96,8 +96,9 @@ func TestGetQueueURL(t *testing.T) {
 		"test-002.fifo",
 		"test-003.fifo",
 	}
+	sqs := NewSqsQueues(goaws.NewDefaultSession())
 	for _, test := range tests {
-		url, err := GetQueueURL(sqsTest, test)
+		url, err := sqs.GetQueueURL(test)
 		if err != nil {
 			t.Errorf("%s failed: %v", test, err)
 		}
@@ -112,12 +113,13 @@ func TestPurgeQueue(t *testing.T) {
 		"test-002.fifo",
 		"test-003.fifo",
 	}
+	sqs := NewSqsQueues(goaws.NewDefaultSession())
 	for _, test := range tests {
-		url, err := GetQueueURL(sqsTest, test)
+		url, err := sqs.GetQueueURL(test)
 		if err != nil {
 			t.Errorf("GetQueueURL failed (%s): %v", test, err)
 		}
-		err = PurgeQueue(sqsTest, url)
+		err = sqs.PurgeQueue(url)
 		if err != nil {
 			t.Errorf("PurgeQueue failed (%s): %v", test, err)
 		} else {
@@ -134,8 +136,9 @@ func TestDeleteQueue(t *testing.T) {
 		{"https://sqs.us-west-2.amazonaws.com/840111470667/test-001", ""},                     // delete existing
 		{"https://sqs.us-west-2.amazonaws.com/840111470667/test-001", ErrAWSNonExistentQueue}, // delete non-existent
 	}
+	sqs := NewSqsQueues(goaws.NewDefaultSession())
 	for _, test := range tests {
-		err := DeleteQueue(sqsTest, test.input)
+		err := sqs.DeleteQueue(test.input)
 		if err != nil {
 			if err.Error() != test.want {
 				t.Errorf("DeleteQueue failed (%s): %v", test.input, err)

@@ -1,6 +1,10 @@
 package gosqs
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ggarcia209/go-aws/goaws"
+)
 
 var avs = []MsgAV{
 	MsgAV{
@@ -14,7 +18,6 @@ var avs = []MsgAV{
 		Value:    "uBook",
 	},
 }
-var sqsTest = InitSesh()
 
 var avMap = CreateMsgAttributes(avs)
 
@@ -68,13 +71,16 @@ func TestSendMessage(t *testing.T) {
 		{name: "test-002.fifo", options: msg2},
 		{name: "test-002.fifo", options: msg3},
 	}
+	sess := goaws.NewDefaultSession()
+	sqsQ := NewSqsQueues(sess)
+	sqsM := NewSqsMessages(sess)
 	for _, test := range tests {
-		url, err := GetQueueURL(sqsTest, test.name)
+		url, err := sqsQ.GetQueueURL(test.name)
 		if err != nil {
 			t.Errorf("GetQueueURL failed (%s): %v", test.name, err)
 		}
 		test.options.QueueURL = url
-		_, err = SendMessage(sqsTest, test.options)
+		_, err = sqsM.SendMessage(test.options)
 		if err != nil {
 			t.Errorf("SendMessage failed: %v", err)
 		}
@@ -120,13 +126,16 @@ func TestReceiveMessage(t *testing.T) {
 		{name: "test-002.fifo", options: RecMsgDefault},
 		{name: "test-002.fifo", options: RecMsgDefault},
 	}
+	sess := goaws.NewDefaultSession()
+	sqsQ := NewSqsQueues(sess)
+	sqsM := NewSqsMessages(sess)
 	for _, test := range tests {
-		url, err := GetQueueURL(sqsTest, test.name)
+		url, err := sqsQ.GetQueueURL(test.name)
 		if err != nil {
 			t.Errorf("GetQueueURL failed (%s): %v", test.name, err)
 		}
 		test.options.QueueURL = url
-		msgs, err := ReceiveMessage(sqsTest, test.options)
+		msgs, err := sqsM.ReceiveMessage(test.options)
 		if err != nil {
 			t.Errorf("SendMessage failed: %v", err)
 		}
@@ -143,19 +152,22 @@ func TestDeleteMessage(t *testing.T) {
 		{name: "test-001", options: RecMsgDefault},
 		{name: "test-002.fifo", options: RecMsgDefault},
 	}
+	sess := goaws.NewDefaultSession()
+	sqsQ := NewSqsQueues(sess)
+	sqsM := NewSqsMessages(sess)
 	for _, test := range tests {
-		url, err := GetQueueURL(sqsTest, test.name)
+		url, err := sqsQ.GetQueueURL(test.name)
 		if err != nil {
 			t.Errorf("GetQueueURL failed (%s): %v", test.name, err)
 		}
 		test.options.QueueURL = url
-		msgs, err := ReceiveMessage(sqsTest, test.options)
+		msgs, err := sqsM.ReceiveMessage(test.options)
 		if err != nil {
 			t.Errorf("ReceiveMessage failed: %v", err)
 		}
 		for _, msg := range msgs {
 			handle := msg.ReceiptHandle
-			err = DeleteMessage(sqsTest, url, handle)
+			err = sqsM.DeleteMessage(url, handle)
 			if err != nil {
 				t.Errorf("DeleteMessage failed: %v", err)
 			}
@@ -163,7 +175,6 @@ func TestDeleteMessage(t *testing.T) {
 	}
 }
 
-//
 func TestDeleteMesssageBatch(t *testing.T) {
 	var tests = []struct {
 		input DeleteMessageBatchRequest
@@ -180,8 +191,9 @@ func TestDeleteMesssageBatch(t *testing.T) {
 			ReceiptHandles: testRecHandles,
 		}, want: nil},
 	}
+	sqsM := NewSqsMessages(goaws.NewDefaultSession())
 	for _, test := range tests {
-		resp, err := DeleteMessageBatch(sqsTest, test.input)
+		resp, err := sqsM.DeleteMessageBatch(test.input)
 		if err != test.want {
 			t.Errorf("FAIL - error: %v", err)
 		}
@@ -197,15 +209,18 @@ func TestChangeMessageVisibilityBatch(t *testing.T) {
 	}{
 		{RecMsgDefault, nil},
 	}
+	sess := goaws.NewDefaultSession()
+	sqsQ := NewSqsQueues(sess)
+	sqsM := NewSqsMessages(sess)
 	msgIDs, handles := []string{}, []string{}
-	url, err := GetQueueURL(sqsTest, "test-queue.fifo")
+	url, err := sqsQ.GetQueueURL("test-queue.fifo")
 	if err != nil {
 		t.Errorf("GetQueueURL failed: %v", err)
 	}
 	for _, test := range tests {
 		test.input.MaxNumberOfMessages = 10
 		test.input.QueueURL = url
-		msgs, err := ReceiveMessage(sqsTest, test.input)
+		msgs, err := sqsM.ReceiveMessage(test.input)
 		if err != nil {
 			t.Errorf("ReceiveMessage failed: %v", err)
 		}
@@ -219,7 +234,7 @@ func TestChangeMessageVisibilityBatch(t *testing.T) {
 			ReceiptHandles: handles,
 			TimeoutSeconds: 5,
 		}
-		resp, err := ChangeMessageVisibilityBatch(sqsTest, req)
+		resp, err := sqsM.ChangeMessageVisibilityBatch(req)
 		if err != nil {
 			t.Errorf("FAIL: %v", err)
 		}
@@ -230,15 +245,19 @@ func TestChangeMessageVisibilityBatch(t *testing.T) {
 }
 
 func BenchmarkChangeMessageVisibilityBatch(b *testing.B) {
+	sess := goaws.NewDefaultSession()
+	sqsQ := NewSqsQueues(sess)
+	sqsM := NewSqsMessages(sess)
+
 	msgIDs, handles := []string{}, []string{}
-	url, err := GetQueueURL(sqsTest, "test-queue.fifo")
+	url, err := sqsQ.GetQueueURL("test-queue.fifo")
 	if err != nil {
 		b.Errorf("GetQueueURL failed: %v", err)
 	}
 	input := RecMsgDefault
 	input.MaxNumberOfMessages = 10
 	input.QueueURL = url
-	msgs, err := ReceiveMessage(sqsTest, input)
+	msgs, err := sqsM.ReceiveMessage(input)
 	if err != nil {
 		b.Errorf("ReceiveMessage failed: %v", err)
 	}
@@ -254,7 +273,7 @@ func BenchmarkChangeMessageVisibilityBatch(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := ChangeMessageVisibilityBatch(sqsTest, req)
+		_, err := sqsM.ChangeMessageVisibilityBatch(req)
 		if err != nil {
 			b.Errorf("FAIL: %v", err)
 		}
