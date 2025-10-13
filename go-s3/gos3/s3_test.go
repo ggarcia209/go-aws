@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/ggarcia209/go-aws/goaws"
 )
 
 func TestGetObject(t *testing.T) {
@@ -16,9 +18,9 @@ func TestGetObject(t *testing.T) {
 		{bucket: "tpillz-presents-dev-2", key: "img/pw-banner.jpg", want: nil},
 		{bucket: "tpillz-presents-dev", key: "img/pw-banner.jpg", want: fmt.Errorf("ITEM_NOT_FOUND")},
 	}
-	svc := InitSesh()
+	svc := NewS3(goaws.NewDefaultSession(), DefaultPartitionSize)
 	for _, test := range tests {
-		_, err := GetObject(svc, test.bucket, test.key)
+		_, err := svc.GetObject(test.bucket, test.key)
 		if err != nil {
 			if test.want == nil {
 				t.Errorf("FAIL: %v", err)
@@ -46,16 +48,14 @@ func TestUploadFile(t *testing.T) {
 		{bucket: "acamoprjct-dev", key: "", filepath: "./img/king.jpg", public: true, want: "InvalidParameter"},
 		{bucket: "", key: "", filepath: "./img/king.jpg", public: true, want: "InvalidParameter"},
 	}
-	partSize := int64(1024 * 1024 * 64) // 4 MB
-	svc := InitSesh()
-	ul := InitUploader(svc, partSize)
+	svc := NewS3(goaws.NewDefaultSession(), DefaultPartitionSize)
 
 	for _, test := range tests {
 		file, err := os.Open(test.filepath)
 		if err != nil {
 			t.Errorf("FAIL - file: %v", err)
 		}
-		res, err := UploadFile(ul, test.bucket, test.key, file, test.public)
+		res, err := svc.UploadFile(test.bucket, test.key, file, test.public)
 		if err == nil && test.want != "" {
 			t.Errorf("FAIL: %v; want: %v", err, test.want)
 		}

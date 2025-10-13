@@ -9,7 +9,6 @@ package gos3
 import (
 	"fmt"
 	"io"
-	"log"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
@@ -17,68 +16,57 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-const ErrNoSuchKey = "ITEM_NOT_FOUND"
+const DefaultPartitionSize = int64(1024 * 1024 * 64) // 64mb
 
-// InitSesh initializes a new AWS sesions and S3 client
-func InitSesh() interface{} {
-	// Initialize a session that the SDK will use to load
-	// credentials from the shared credentials file ~/.aws/credentials
-	sesh := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
-	log.Printf("region: %v", aws.StringValue(sesh.Config.Region))
+type S3Logic interface {
+	GetObject(bucket, key string) ([]byte, error)
+	UploadFile(bucket, key string, file io.Reader, publicRead bool) (UploadFileResponse, error)
+}
 
-	// Create SNS client
-	svc := s3.New(sesh)
+type S3 struct {
+	svc      *s3.S3
+	uploader *s3manager.Uploader
+}
 
-	log.Println("S3 client initialized")
-
-	return svc
+func NewS3(sess goaws.Session, partitionSize int64) *S3 {
+	svc := s3.New(sess.GetSession())
+	if partitionSize < 1024 {
+		partitionSize = DefaultPartitionSize
+	}
+	uploader := s3manager.NewUploaderWithClient(svc, func(u *s3manager.Uploader) {
+		u.PartSize = partitionSize
+	})
+	return &S3{
+		svc:      svc,
+		uploader: uploader,
+	}
 }
 
 func NewS3Client(session goaws.Session) interface{} {
-	// Create SNS client
-	svc := s3.New(session.GetSession())
-
-	log.Println("S3 client initialized")
-
-	return svc
-}
-
-func InitUploader(svc interface{}, partSize int64) interface{} {
-	uploader := s3manager.NewUploaderWithClient(svc.(*s3.S3), func(u *s3manager.Uploader) {
-		u.PartSize = partSize
-	})
-	log.Printf("uploader initialized...")
-	return uploader
+	return s3.New(session.GetSession())
 }
 
 // GetObject returns the S3 object at the given bucket/key as a byte slice.
-func GetObject(svc interface{}, bucket, key string) ([]byte, error) {
-	obj, err := svc.(*s3.S3).GetObject(&s3.GetObjectInput{
+func (s *S3) GetObject(bucket, key string) ([]byte, error) {
+	obj, err := s.svc.GetObject(&s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
 	})
 	if err != nil {
-		log.Printf("GetObject failed: %v", err)
 		if awsErr, ok := err.(awserr.Error); ok {
-			log.Printf("code: %v", awsErr.Code())
 			if awsErr.Code() == "NoSuchKey" {
-				return []byte{}, fmt.Errorf(ErrNoSuchKey)
+				return []byte{}, fmt.Errorf("s.svc.GetObject: %w", ErrNoSuchKey)
 			}
 		}
-		return []byte{}, err
+		return []byte{}, fmt.Errorf("s.svc.GetObject: %w", err)
 	}
 
 	buf := new(strings.Builder)
-	_, err = io.Copy(buf, obj.Body)
-	if err != nil {
-		log.Printf("GetObject failed: %v", err)
-		return []byte{}, err
+	if _, err = io.Copy(buf, obj.Body); err != nil {
+		return []byte{}, fmt.Errorf("io.Copy: %w", err)
 	}
 
 	res := []byte(buf.String())
@@ -87,7 +75,7 @@ func GetObject(svc interface{}, bucket, key string) ([]byte, error) {
 }
 
 // UploadFile uploads a new file to the given S3 bucket.
-func UploadFile(uploader interface{}, bucket, key string, file io.Reader, publicRead bool) (UploadFileResponse, error) {
+func (s *S3) UploadFile(bucket, key string, file io.Reader, publicRead bool) (UploadFileResponse, error) {
 	input := &s3manager.UploadInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -96,10 +84,9 @@ func UploadFile(uploader interface{}, bucket, key string, file io.Reader, public
 	if publicRead {
 		input.ACL = aws.String("public-read")
 	}
-	result, err := uploader.(*s3manager.Uploader).Upload(input)
+	result, err := s.uploader.Upload(input)
 	if err != nil {
-		log.Printf("UploadFile failed: %v", err)
-		return UploadFileResponse{}, err
+		return UploadFileResponse{}, fmt.Errorf("s.uploader.Upload: %w", err)
 	}
 
 	resp := UploadFileResponse{
