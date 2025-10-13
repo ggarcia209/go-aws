@@ -2,25 +2,9 @@ package dynamo
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
-)
-
-const (
-	// ErrTxConditionCheckFailed is returned when a transaction item fails it's conditional check.
-	// This error cannot be retried.
-	ErrTxConditionCheckFailed = "TX_CONDITION_CHECK_FAILED"
-	// ErrTxConflict is returned when another transaction is in progress for a transaction item.
-	// This error can be retried.
-	ErrTxConflict = "TX_CONFLICT"
-	// ErrTxInProgress is returned when multiple transactions are attempted with the same idempotency key.
-	// This error cannot be retried.
-	ErrTxInProgress = "TX_IN_PROGRESS"
-	// ErrTxThrottled is returned when a transaction item fails due to throttling.
-	// This error can be retried.
-	ErrTxThrottled = "TX_THROTTLED"
 )
 
 // TransactionItem contains an item to create / update
@@ -102,10 +86,9 @@ func NewConditionCheckTxItem(name string, t *Table, q *Query, e Expression) Tran
 // TxConditionCheck checks that each conditional check for a list of transaction items passes. Failed condition checks
 // return an error value, and a list of the TransactionItems that failed their condition checks. Successful condition
 // checks return an empty list of TransactionItems and nil error value.
-func TxWrite(svc *dynamodb.DynamoDB, items []TransactionItem, requestToken string) ([]TransactionItem, error) {
+func (d *DynamoDB) TxWrite(items []TransactionItem, requestToken string) ([]TransactionItem, error) {
 	// verify <= 25 tx items
 	if len(items) > 25 {
-		log.Printf("TxUpdate failed: tx items exceeds max size")
 		return []TransactionItem{}, fmt.Errorf("TX_ITEMS_EXCEEDS_LIMIT")
 	}
 
@@ -119,24 +102,20 @@ func TxWrite(svc *dynamodb.DynamoDB, items []TransactionItem, requestToken strin
 	for _, ti := range items {
 		txItem, err := newTxWriteItem(ti)
 		if err != nil {
-			log.Fatalf("TxWrite failed: %v", err)
-			return []TransactionItem{}, err
+			return []TransactionItem{}, fmt.Errorf("newTxWriteItem: %w", err)
 		}
 		txInput.TransactItems = append(txInput.TransactItems, txItem)
 	}
 
 	failed := []TransactionItem{}
 
-	_, err := svc.TransactWriteItems(txInput)
-	if err != nil {
+	if _, err := d.svc.TransactWriteItems(txInput); err != nil {
 		switch t := err.(type) {
 		case *dynamodb.TransactionCanceledException:
-			log.Printf("failed to write items: %s\n %v", t.Message(), t.CancellationReasons)
 			check := false     // denotes conditional checks failed
 			throttled := false // denotes if tx failed due to throttling
 
 			for i, r := range t.CancellationReasons {
-				log.Printf("cancellation code: %s", *r.Code)
 				if *r.Code == "ConditionalCheckFailed" {
 					check = true
 					failed = append(failed, items[i])
@@ -149,29 +128,25 @@ func TxWrite(svc *dynamodb.DynamoDB, items []TransactionItem, requestToken strin
 
 			if check {
 				// no retry
-				return failed, fmt.Errorf(ErrTxConditionCheckFailed)
+				return failed, ErrTxConditionCheckFailed
 			}
 			if throttled {
 				// retry
-				return failed, fmt.Errorf(ErrTxThrottled)
+				return failed, ErrTxThrottled
 			}
 			// no retry
-			return failed, err
+			return failed, fmt.Errorf("d.svc.TransactWriteItems: %w", err)
 		case *dynamodb.TransactionConflictException:
 			// retry
-			log.Printf("failed to write items: %s", t.Message())
-			return failed, fmt.Errorf(ErrTxConflict)
+			return failed, ErrTxConflict
 		case *dynamodb.TransactionInProgressException:
 			// no retry
-			log.Printf("failed to write items: %s", t.Message())
-			return failed, fmt.Errorf(ErrTxInProgress)
+			return failed, ErrTxInProgress
 		default:
-			log.Printf("failed to check items: %v", err)
 			return failed, err
 		}
 	}
 
-	log.Printf("Write TX Success!\n")
 	return failed, nil
 }
 
@@ -182,8 +157,7 @@ func newTxWriteItem(ti TransactionItem) (*dynamodb.TransactWriteItem, error) {
 	case "C":
 		m, err := marshalMap(ti.Item)
 		if err != nil {
-			log.Printf("newTxWriteItem failed: %v", err)
-			return nil, err
+			return nil, fmt.Errorf("marshalMap: %w", err)
 		}
 		txItem := &dynamodb.TransactWriteItem{
 			Put: &dynamodb.Put{
@@ -230,8 +204,7 @@ func newTxWriteItem(ti TransactionItem) (*dynamodb.TransactWriteItem, error) {
 		}
 		return txItem, nil
 	default:
-		log.Printf("invalid request type")
-		return &dynamodb.TransactWriteItem{}, fmt.Errorf("INVALID_REQUEST_TYPE")
+		return nil, ErrInvalidRequestType
 	}
 
 }

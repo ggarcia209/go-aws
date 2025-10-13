@@ -10,65 +10,78 @@ package dynamo
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
+	"github.com/ggarcia209/go-aws/goaws"
 
 	"github.com/aws/aws-sdk-go/aws"
 
 	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 )
 
 const ErrRequestThrottled = "ERR_REQUEST_THROTTLED"
 
+type DynamoDbLogic interface {
+	ListTables() ([]string, int, error)
+	CreateTable(table *Table) error
+	CreateItem(item interface{}, tableName string) error
+	DeleteTable(svc *dynamodb.DynamoDB, tableName string) error
+	GetItem(q *Query, tableName string, item interface{}, expr Expression) (interface{}, error)
+	UpdateItem(q *Query, tableName string, expr Expression) error
+	DeleteItem(q *Query, tableName string) error
+	BatchWriteCreate(tableName string, fc *FailConfig, items []interface{}) error
+	BatchWriteDelete(tableName string, fc *FailConfig, queries []*Query) error
+	BatchGet(tableName string, fc *FailConfig, queries []*Query, refObjs []interface{}, expr Expression) ([]interface{}, error)
+	ScanItems(tableName string, model interface{}, startKey interface{}, expr Expression) ([]interface{}, error)
+	TxWrite(items []TransactionItem, requestToken string) ([]TransactionItem, error)
+}
+
+type DynamoDB struct {
+	svc        *dynamodb.DynamoDB
+	tables     map[string]*Table
+	failConfig *FailConfig
+}
+
+func NewDynamoDB(sess goaws.Session, tables []*Table, failConfig *FailConfig) *DynamoDB {
+	tm := make(map[string]*Table)
+	for _, t := range tables {
+		tm[t.TableName] = t
+	}
+	return &DynamoDB{
+		svc:        dynamodb.New(sess.GetSession()),
+		tables:     tm,
+		failConfig: failConfig,
+	}
+}
+
 // InitSesh initializes a new session with default config/credentials.
-func InitSesh() *dynamodb.DynamoDB {
-	// Initialize a session that the SDK will use to load
-	// credentials from the shared credentials file ~/.aws/credentials
-	sesh := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
-
-	log.Println("session intialized")
-	log.Println("region: ", aws.StringValue(sesh.Config.Region))
-
-	// Create DynamoDB client
-	svc := dynamodb.New(sesh)
-	log.Println("DynamoDB client initialized")
-
-	return svc
+func InitSesh(sess goaws.Session) *dynamodb.DynamoDB {
+	return dynamodb.New(sess.GetSession())
 }
 
 // ListTables lists the tables in the database.
-func ListTables(svc *dynamodb.DynamoDB) ([]string, int, error) {
+func (d *DynamoDB) ListTables() ([]string, int, error) {
 	names := []string{}
 	t := 0
 	input := &dynamodb.ListTablesInput{}
-	fmt.Println("Tables:")
 
 	for {
 		// Get the list of tables
-		result, err := svc.ListTables(input)
+		result, err := d.svc.ListTables(input)
 		if err != nil {
-			if aerr, ok := err.(awserr.Error); ok {
-				switch aerr.Code() {
-				case dynamodb.ErrCodeInternalServerError:
-					fmt.Println(dynamodb.ErrCodeInternalServerError, aerr.Error())
-				default:
-					fmt.Println(aerr.Error())
-				}
-			} else {
-				// Print the error, cast err to awserr.Error to get the Code
-				// and Message from the error
-				fmt.Println(err.Error())
-			}
-			return nil, 0, fmt.Errorf("ListTables failed: %v", err)
+			// if aerr, ok := err.(awserr.Error); ok {
+			// 	switch aerr.Code() {
+			// 	case dynamodb.ErrCodeInternalServerError:
+			// 		fmt.Println(dynamodb.ErrCodeInternalServerError, aerr.Error())
+			// 	default:
+			// 		fmt.Println(aerr.Error())
+			// 	}
+			// }
+			return nil, 0, fmt.Errorf("d.svc.ListTables: %w", err)
 		}
 
 		for _, n := range result.TableNames {
-			fmt.Println(*n)
 			names = append(names, *n)
 			t++
 		}
@@ -87,7 +100,7 @@ func ListTables(svc *dynamodb.DynamoDB) ([]string, int, error) {
 
 // CreateTable creates a new table with the parameters passed to the Table struct.
 // NOTE: CreateTable creates Table in * On-Demand * billing mode.
-func CreateTable(svc *dynamodb.DynamoDB, table *Table) error {
+func (d *DynamoDB) CreateTable(table *Table) error {
 	input := &dynamodb.CreateTableInput{
 		AttributeDefinitions: []*dynamodb.AttributeDefinition{
 			{ // Primary Key
@@ -113,52 +126,56 @@ func CreateTable(svc *dynamodb.DynamoDB, table *Table) error {
 		TableName: aws.String(table.TableName),
 	}
 
-	_, err := svc.CreateTable(input)
-	if err != nil {
+	if _, err := d.svc.CreateTable(input); err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			if awsErr.Code() == "ResourceInUseException" {
 				return fmt.Errorf(awsErr.Code())
 			}
-			fmt.Println("Got error calling CreateTable:")
-			// Get error details
-			fmt.Println("CreateTable failed:", awsErr.Code(), awsErr.Message())
 		} else {
-			fmt.Println(err.Error())
-			return fmt.Errorf("CreateTable failed: %v", err)
+			return fmt.Errorf("d.svc.CreateTable: %w", err)
 		}
 	}
 
-	fmt.Println("Created the table: ", table.TableName)
+	d.tables[table.TableName] = table
+
 	return nil
 }
 
 // CreateItem puts a new item in the table.
-func CreateItem(svc *dynamodb.DynamoDB, item interface{}, table *Table) error {
+func (d *DynamoDB) CreateItem(item interface{}, tableName string) error {
+	// check if table exists
+	t := d.tables[tableName]
+	if t == nil {
+		return NewTableNotFoundErr(tableName)
+	}
+
 	av, err := dynamodbattribute.MarshalMap(item)
 	if err != nil {
-		log.Printf("CreateItem failed: Got error marshalling new movie item: %v", err)
-		return err
+		return fmt.Errorf("dynamodbattribute.MarshalMap: %w", err)
 	}
 
 	input := &dynamodb.PutItemInput{
 		Item:      av,
-		TableName: aws.String(table.TableName),
+		TableName: aws.String(tableName),
 	}
 
-	_, err = svc.PutItem(input)
-	if err != nil {
-		log.Printf("CreateItem failed: %v", err)
-		return err
+	if _, err = d.svc.PutItem(input); err != nil {
+		return fmt.Errorf("d.svc.PutItem: %w", err)
 	}
 
-	log.Printf("Successfully added item to table %s\n", table.TableName)
 	return nil
 }
 
 // GetItem reads an item from the database.
 // Returns Attribute Value map interface (map[stirng]interface{}) if object found.
 // Returns interface of type item if object not found.
-func GetItem(svc *dynamodb.DynamoDB, q *Query, t *Table, item interface{}, expr Expression) (interface{}, error) {
+func (d *DynamoDB) GetItem(q *Query, tableName string, item interface{}, expr Expression) (interface{}, error) {
+	// get table
+	t := d.tables[tableName]
+	if t == nil {
+		return nil, NewTableNotFoundErr(tableName)
+	}
+
 	key := keyMaker(q, t)
 	input := &dynamodb.GetItemInput{
 		TableName: aws.String(t.TableName),
@@ -169,16 +186,14 @@ func GetItem(svc *dynamodb.DynamoDB, q *Query, t *Table, item interface{}, expr 
 		input.ProjectionExpression = expr.Projection()
 	}
 
-	result, err := svc.GetItem(input)
+	result, err := d.svc.GetItem(input)
 	if err != nil {
-		log.Printf("GetItem failed: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("d.svc.GetItem: %w", err)
 	}
 
 	err = dynamodbattribute.UnmarshalMap(result.Item, &item)
 	if err != nil {
-		log.Printf("GetItem failed: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("dynamodbattribute.UnmarshalMap: %w", err)
 	}
 
 	return item, nil
@@ -186,7 +201,13 @@ func GetItem(svc *dynamodb.DynamoDB, q *Query, t *Table, item interface{}, expr 
 
 // UpdateItem updates the specified item's attribute defined in the
 // Query object with the UpdateValue defined in the Query.
-func UpdateItem(svc *dynamodb.DynamoDB, q *Query, t *Table, expr Expression) error {
+func (d *DynamoDB) UpdateItem(q *Query, tableName string, expr Expression) error {
+	// get table
+	t := d.tables[tableName]
+	if t == nil {
+		return NewTableNotFoundErr(tableName)
+	}
+
 	input := &dynamodb.UpdateItemInput{
 		ExpressionAttributeNames:  expr.Names(),
 		ExpressionAttributeValues: expr.Values(),
@@ -208,59 +229,70 @@ func UpdateItem(svc *dynamodb.DynamoDB, q *Query, t *Table, expr Expression) err
 		input.ConditionExpression = expr.Projection()
 	}
 
-	_, err := svc.UpdateItem(input)
-	if err != nil {
+	if _, err := d.svc.UpdateItem(input); err != nil {
 		if err.(awserr.Error).Code() == dynamodb.ErrCodeConditionalCheckFailedException {
-			log.Println("UpdateItem failed: Conditional check failed")
-			return fmt.Errorf(ErrConditionalCheck)
+			return fmt.Errorf("d.svc.UpdateItem: %w", ErrConditionalCheck)
 		}
 		if err.(awserr.Error).Code() == dynamodb.ErrCodeProvisionedThroughputExceededException {
-			log.Println("UpdateItem failed: Item throttled")
-			return fmt.Errorf(ErrRequestThrottled)
+			return fmt.Errorf("d.svc.UpdateItem: %w", ErrRequestThrottled)
 		}
-		log.Printf("UpdateItem failed: %v", err.Error())
-		return err
+
+		return fmt.Errorf("d.svc.UpdateItem: %w", err)
 	}
 
-	log.Printf("Updated %v: %v: %s = %v\n", q.PrimaryValue, q.SortValue, q.UpdateFieldName, q.UpdateValue)
 	return nil
 }
 
 // DeleteTable deletes the selected table.
-func DeleteTable(svc *dynamodb.DynamoDB, t *Table) error {
+func (d *DynamoDB) DeleteTable(tableName string) error {
+	// get table
+	t := d.tables[tableName]
+	if t == nil {
+		return NewTableNotFoundErr(tableName)
+	}
+
 	input := &dynamodb.DeleteTableInput{
 		TableName: aws.String(t.TableName),
 	}
-	_, err := svc.DeleteTable(input)
-	if err != nil {
-		fmt.Println(err.Error())
-		return fmt.Errorf("DeleteTable failed: %v", err)
+	if _, err := d.svc.DeleteTable(input); err != nil {
+		return fmt.Errorf("d.svc.DeleteTable: %w", err)
 	}
-	fmt.Println("Deleted Table: ", t.TableName)
+
+	delete(d.tables, tableName)
+
 	return nil
 }
 
 // DeleteItem deletes the specified item defined in the Query
-func DeleteItem(svc *dynamodb.DynamoDB, q *Query, t *Table) error {
+func (d *DynamoDB) DeleteItem(q *Query, tableName string) error {
+	// get table
+	t := d.tables[tableName]
+	if t == nil {
+		return NewTableNotFoundErr(tableName)
+	}
+
 	input := &dynamodb.DeleteItemInput{
 		Key:       keyMaker(q, t),
 		TableName: aws.String(t.TableName),
 	}
 
-	_, err := svc.DeleteItem(input)
-	if err != nil {
-		log.Printf("DeleteItem failed: %v", err)
-		return err
+	if _, err := d.svc.DeleteItem(input); err != nil {
+		return fmt.Errorf("d.svc.DeleteItem: %w", err)
 	}
 
-	log.Printf("Deleted %s: %s from table %s\n", q.PrimaryValue, q.SortValue, t.TableName)
 	return nil
 }
 
 // BatchWriteCreate writes a list of items to the database.
-func BatchWriteCreate(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, items []interface{}) error {
+func (d *DynamoDB) BatchWriteCreate(tableName string, fc *FailConfig, items []interface{}) error {
 	if len(items) > 25 {
 		return fmt.Errorf("too many items to process")
+	}
+
+	// get table
+	t := d.tables[tableName]
+	if t == nil {
+		return NewTableNotFoundErr(tableName)
 	}
 
 	// create map of RequestItems
@@ -270,15 +302,13 @@ func BatchWriteCreate(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, items []
 	// create PutRequests for each item
 	for _, item := range items {
 		if item == nil {
-			fmt.Println("nil item")
 			continue
 		}
 
 		// marshal each item
 		av, err := dynamodbattribute.MarshalMap(item)
 		if err != nil {
-			fmt.Println("*** err item: ", item)
-			return fmt.Errorf("BatchWriteCreate failed: %v", err)
+			return fmt.Errorf("ynamodbattribute.MarshalMap: %w", err)
 		}
 		// create put request, reformat as write request, and add to list
 		pr := &dynamodb.PutRequest{Item: av}
@@ -297,25 +327,22 @@ func BatchWriteCreate(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, items []
 	var result *dynamodb.BatchWriteItemOutput
 	var err error
 	for {
-		result, err = batchWriteUtil(svc, input)
+		result, err = d.batchWriteUtil(input)
 		if err != nil {
 			// if not HTTP 5xx error
 			if err.(awserr.Error).Code() != dynamodb.ErrCodeInternalServerError {
-				fmt.Printf("unprocessed items: \n%v\n", result.UnprocessedItems)
 				// return fmt.Errorf("BatchWriteCreate failed: %v", err)
-				return err
+				return fmt.Errorf("d.batchWriteUtil: %w", err)
 			}
 
 			// Retry with exponential backoff algorithm
 			if err.(awserr.Error).Code() == dynamodb.ErrCodeInternalServerError && result.UnprocessedItems != nil {
-				fmt.Printf("unprocessed items: \n%v\n", result.UnprocessedItems)
 				input = &dynamodb.BatchWriteItemInput{
 					RequestItems: result.UnprocessedItems,
 				}
-				fmt.Println("retrying...")
 				fc.ExponentialBackoff() // waits
-				if fc.MaxRetriesReached == true {
-					return fmt.Errorf("BatchWriteCreate failed: Max retries exceeded: %v", err)
+				if fc.MaxRetriesReached {
+					return fmt.Errorf("d.batchWriteUtil: %w", err)
 				}
 			}
 		}
@@ -331,9 +358,15 @@ func BatchWriteCreate(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, items []
 }
 
 // BatchWriteDelete deletes a list of items from the database.
-func BatchWriteDelete(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, queries []*Query) error {
+func (d *DynamoDB) BatchWriteDelete(tableName string, fc *FailConfig, queries []*Query) error {
 	if len(queries) > 25 {
 		return fmt.Errorf("too many items to process")
+	}
+
+	// get table
+	t := d.tables[tableName]
+	if t == nil {
+		return NewTableNotFoundErr(tableName)
 	}
 
 	// create map of RequestItems
@@ -363,12 +396,11 @@ func BatchWriteDelete(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, queries 
 	var result *dynamodb.BatchWriteItemOutput
 	var err error
 	for {
-		result, err = batchWriteUtil(svc, input)
+		result, err = d.batchWriteUtil(input)
 		if err != nil {
 			// if not HTTP 5xx error
 			if err.(awserr.Error).Code() != dynamodb.ErrCodeInternalServerError {
-				fmt.Printf("unprocessed items: \n%v\n", result.UnprocessedItems)
-				return fmt.Errorf("BatchWriteDelete failed: %v", err)
+				return fmt.Errorf("d.batchWriteUtil: %w", err)
 			}
 
 			// Retry with exponential backoff algorithm
@@ -378,8 +410,8 @@ func BatchWriteDelete(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, queries 
 					RequestItems: result.UnprocessedItems,
 				}
 				fc.ExponentialBackoff() // waits
-				if fc.MaxRetriesReached == true {
-					return fmt.Errorf("BatchWriteDelete failed: Max retries exceeded: %v", err)
+				if fc.MaxRetriesReached {
+					return fmt.Errorf("d.batchWriteUtil: %w", err)
 				}
 			}
 		}
@@ -398,13 +430,19 @@ func BatchWriteDelete(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, queries 
 // refObjs must be non-nil pointers of the same type,
 // 1 for each query/object returned.
 //   - Returns err if len(queries) != len(refObjs).
-func BatchGet(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, queries []*Query, refObjs []interface{}, expr Expression) ([]interface{}, error) {
+func (d *DynamoDB) BatchGet(tableName string, fc *FailConfig, queries []*Query, refObjs []interface{}, expr Expression) ([]interface{}, error) {
 	if len(queries) > 100 {
 		return nil, fmt.Errorf("too many items to process")
 	}
 
 	if len(queries) != len(refObjs) {
 		return nil, fmt.Errorf("number of queries does not match number of reference objects")
+	}
+
+	// get table
+	t := d.tables[tableName]
+	if t == nil {
+		return nil, NewTableNotFoundErr(tableName)
 	}
 
 	items := []interface{}{}
@@ -435,41 +473,35 @@ func BatchGet(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, queries []*Query
 	var result *dynamodb.BatchGetItemOutput
 	var err error
 	for {
-		result, err = batchGetUtil(svc, input)
+		result, err = d.batchGetUtil(input)
 		if err != nil {
 			// if not HTTP 5xx error
 			if err.(awserr.Error).Code() != dynamodb.ErrCodeInternalServerError {
-				fmt.Printf("unprocessed items: \n%v\n", result.UnprocessedKeys)
-				return nil, fmt.Errorf("BatchGet failed: %v", err)
+				return nil, fmt.Errorf("d.batchGetUtil: %w", err)
 			}
 			if err.(awserr.Error).Code() == "ValidationException" {
-				fmt.Printf("unprocessed items: \n%v\n", result.UnprocessedKeys)
-				return nil, err
+				return nil, fmt.Errorf("d.batchGetUtil: %w", err)
 			}
 			if err.(awserr.Error).Code() == "RequestError" {
-				fmt.Printf("unprocessed items: \n%v\n", result.UnprocessedKeys)
-				return nil, err
+				return nil, fmt.Errorf("d.batchGetUtil: %w", err)
 			}
 
 			// Retry with exponential backoff algorithm
 			if err.(awserr.Error).Code() == dynamodb.ErrCodeInternalServerError && result.UnprocessedKeys != nil {
-				fmt.Printf("unprocessed items: \n%v\n", result.UnprocessedKeys)
 				input = &dynamodb.BatchGetItemInput{
 					RequestItems: result.UnprocessedKeys,
 				}
 				fc.ExponentialBackoff() // waits
-				if fc.MaxRetriesReached == true {
-					return nil, fmt.Errorf("BatchGet failed: Max retries exceeded: %v", err)
+				if fc.MaxRetriesReached {
+					return nil, fmt.Errorf("d.batchGetUtil: %w", err)
 				}
 			}
 		}
 
 		for i, r := range result.Responses[t.TableName] {
 			ref := refObjs[i]
-			err = dynamodbattribute.UnmarshalMap(r, &ref)
-			if err != nil {
-				fmt.Printf("Failed to unmarshal record, %v\n", err)
-				return nil, fmt.Errorf("BatchGet failed: Failed to unmarshal record, %v", err)
+			if err := dynamodbattribute.UnmarshalMap(r, &ref); err != nil {
+				return nil, fmt.Errorf("dynamodbattribute.UnmarshalMap, %w", err)
 			}
 			items = append(items, ref)
 		}
@@ -484,41 +516,47 @@ func BatchGet(svc *dynamodb.DynamoDB, t *Table, fc *FailConfig, queries []*Query
 	return items, nil
 }
 
-func batchWriteUtil(svc *dynamodb.DynamoDB, input *dynamodb.BatchWriteItemInput) (*dynamodb.BatchWriteItemOutput, error) {
-	result, err := svc.BatchWriteItem(input)
+func (d *DynamoDB) batchWriteUtil(input *dynamodb.BatchWriteItemInput) (*dynamodb.BatchWriteItemOutput, error) {
+	result, err := d.svc.BatchWriteItem(input)
 	if err != nil {
-		if aerr, ok := err.(awserr.Error); ok {
-			switch aerr.Code() {
-			case dynamodb.ErrCodeProvisionedThroughputExceededException:
-				fmt.Println(dynamodb.ErrCodeProvisionedThroughputExceededException, aerr.Error())
-			case dynamodb.ErrCodeResourceNotFoundException:
-				fmt.Println(dynamodb.ErrCodeResourceNotFoundException, aerr.Error())
-			case dynamodb.ErrCodeItemCollectionSizeLimitExceededException:
-				fmt.Println(dynamodb.ErrCodeItemCollectionSizeLimitExceededException, aerr.Error())
-			case dynamodb.ErrCodeRequestLimitExceeded:
-				fmt.Println(dynamodb.ErrCodeRequestLimitExceeded, aerr.Error())
-			case dynamodb.ErrCodeInternalServerError:
-				fmt.Println(dynamodb.ErrCodeInternalServerError, aerr.Error())
-			default:
-				fmt.Println(aerr.Error())
-			}
-		} else {
-			// Print the error, cast err to awserr.Error to get the Code and
-			// Message from an error.
-			fmt.Println(err.Error())
-		}
+		// if aerr, ok := err.(awserr.Error); ok {
+		// 	switch aerr.Code() {
+		// 	case dynamodb.ErrCodeProvisionedThroughputExceededException:
+		// 		fmt.Println(dynamodb.ErrCodeProvisionedThroughputExceededException, aerr.Error())
+		// 	case dynamodb.ErrCodeResourceNotFoundException:
+		// 		fmt.Println(dynamodb.ErrCodeResourceNotFoundException, aerr.Error())
+		// 	case dynamodb.ErrCodeItemCollectionSizeLimitExceededException:
+		// 		fmt.Println(dynamodb.ErrCodeItemCollectionSizeLimitExceededException, aerr.Error())
+		// 	case dynamodb.ErrCodeRequestLimitExceeded:
+		// 		fmt.Println(dynamodb.ErrCodeRequestLimitExceeded, aerr.Error())
+		// 	case dynamodb.ErrCodeInternalServerError:
+		// 		fmt.Println(dynamodb.ErrCodeInternalServerError, aerr.Error())
+		// 	default:
+		// 		fmt.Println(aerr.Error())
+		// 	}
+		// } else {
+		// 	// Print the error, cast err to awserr.Error to get the Code and
+		// 	// Message from an error.
+		// 	fmt.Println(err.Error())
+		// }
+		return nil, fmt.Errorf("d.svc.BatchWriteItem: %w", err)
 	}
-	return result, err
+	return result, nil
 }
 
 // ScanItems scans the given Table for items matching the given expression parameters.
-func ScanItems(svc *dynamodb.DynamoDB, t *Table, model interface{}, startKey interface{}, expr Expression) ([]interface{}, error) {
+func (d *DynamoDB) ScanItems(tableName string, model interface{}, startKey interface{}, expr Expression) ([]interface{}, error) {
+	// get table
+	t := d.tables[tableName]
+	if t == nil {
+		return nil, NewTableNotFoundErr(tableName)
+	}
+
 	items := []interface{}{}
 
 	av, err := dynamodbattribute.MarshalMap(startKey)
 	if err != nil {
-		log.Printf("ScanItems failed: %v", err)
-		return items, err
+		return items, fmt.Errorf("dynamodbattribute.MarshalMap: %w", err)
 	}
 
 	// Build the query input parameters
@@ -535,10 +573,9 @@ func ScanItems(svc *dynamodb.DynamoDB, t *Table, model interface{}, startKey int
 	}
 
 	// Make the DynamoDB Query API call
-	result, err := svc.Scan(input)
+	result, err := d.svc.Scan(input)
 	if err != nil {
-		log.Printf("ScanItems failed: %v", err)
-		return items, err
+		return items, fmt.Errorf("d.svc.Scan: %w", err)
 	}
 
 	// ADD LOGIC FOR HANDLING PAGINATION
@@ -547,8 +584,7 @@ func ScanItems(svc *dynamodb.DynamoDB, t *Table, model interface{}, startKey int
 		item := model
 		err = dynamodbattribute.UnmarshalMap(res, &item)
 		if err != nil {
-			log.Printf("ScanItems failed: %v", err)
-			return []interface{}{}, err
+			return []interface{}{}, fmt.Errorf("dynamodbattribute.UnmarshalMap: %w", err)
 		}
 		items = append(items, item)
 	}
@@ -556,48 +592,39 @@ func ScanItems(svc *dynamodb.DynamoDB, t *Table, model interface{}, startKey int
 	return items, nil
 }
 
-func batchGetUtil(svc *dynamodb.DynamoDB, input *dynamodb.BatchGetItemInput) (*dynamodb.BatchGetItemOutput, error) {
-	result, err := svc.BatchGetItem(input)
+func (d *DynamoDB) batchGetUtil(input *dynamodb.BatchGetItemInput) (*dynamodb.BatchGetItemOutput, error) {
+	result, err := d.svc.BatchGetItem(input)
 	if err != nil {
-		if aerr, ok := err.(awserr.Error); ok {
-			switch aerr.Code() {
-			case dynamodb.ErrCodeProvisionedThroughputExceededException:
-				fmt.Println(dynamodb.ErrCodeProvisionedThroughputExceededException, aerr.Error())
-			case dynamodb.ErrCodeResourceNotFoundException:
-				fmt.Println(dynamodb.ErrCodeResourceNotFoundException, aerr.Error())
-			case dynamodb.ErrCodeItemCollectionSizeLimitExceededException:
-				fmt.Println(dynamodb.ErrCodeItemCollectionSizeLimitExceededException, aerr.Error())
-			case dynamodb.ErrCodeRequestLimitExceeded:
-				fmt.Println(dynamodb.ErrCodeRequestLimitExceeded, aerr.Error())
-			case dynamodb.ErrCodeInternalServerError:
-				fmt.Println(dynamodb.ErrCodeInternalServerError, aerr.Error())
-			default:
-				fmt.Println(aerr.Error())
-			}
-		} else {
-			// Print the error, cast err to awserr.Error to get the Code and
-			// Message from an error.
-			fmt.Println(err.Error())
-		}
+		// if aerr, ok := err.(awserr.Error); ok {
+		// 	switch aerr.Code() {
+		// 	case dynamodb.ErrCodeProvisionedThroughputExceededException:
+		// 		fmt.Println(dynamodb.ErrCodeProvisionedThroughputExceededException, aerr.Error())
+		// 	case dynamodb.ErrCodeResourceNotFoundException:
+		// 		fmt.Println(dynamodb.ErrCodeResourceNotFoundException, aerr.Error())
+		// 	case dynamodb.ErrCodeItemCollectionSizeLimitExceededException:
+		// 		fmt.Println(dynamodb.ErrCodeItemCollectionSizeLimitExceededException, aerr.Error())
+		// 	case dynamodb.ErrCodeRequestLimitExceeded:
+		// 		fmt.Println(dynamodb.ErrCodeRequestLimitExceeded, aerr.Error())
+		// 	case dynamodb.ErrCodeInternalServerError:
+		// 		fmt.Println(dynamodb.ErrCodeInternalServerError, aerr.Error())
+		// 	default:
+		// 		fmt.Println(aerr.Error())
+		// 	}
+		// } else {
+		// 	// Print the error, cast err to awserr.Error to get the Code and
+		// 	// Message from an error.
+		// 	fmt.Println(err.Error())
+		// }
+		return nil, fmt.Errorf("d.svc.BatchGetItem: %w", err)
 	}
-	return result, err
-}
-
-func marshal(input interface{}) (*dynamodb.AttributeValue, error) {
-	marshal, err := dynamodbattribute.Marshal(input)
-	if err != nil {
-		log.Printf("marshal failed: %v", err)
-		return nil, err
-	}
-	return marshal, nil
+	return result, nil
 }
 
 // marshalMap marshals an interface object into an AttributeValue map
 func marshalMap(input interface{}) (map[string]*dynamodb.AttributeValue, error) {
 	marshal, err := dynamodbattribute.MarshalMap(input)
 	if err != nil {
-		log.Printf("marshalMap failed: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("dynamodbattribute.MarshalMap: %w", err)
 	}
 	return marshal, nil
 }

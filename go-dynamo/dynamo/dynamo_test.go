@@ -3,12 +3,12 @@ package dynamo
 import (
 	"fmt"
 	"testing"
+
+	"github.com/ggarcia209/go-aws/goaws"
 )
 
 const TableName = "go-dynamo-test"
 const buildTreeErrProjection = "buildTree error: unset parameter: ProjectionBuilder"
-
-var svc = InitSesh()
 
 var table = &Table{
 	TableName:      TableName,
@@ -17,8 +17,6 @@ var table = &Table{
 	SortKeyName:    "uuid",
 	SortKeyType:    "string",
 }
-
-var dbInfo = InitDbInfo()
 
 type record struct {
 	Partition string          `json:"partition"`
@@ -30,8 +28,8 @@ type record struct {
 }
 
 func TestCreateItem(t *testing.T) {
-	dbInfo.SetSvc(svc)
-	dbInfo.AddTable(table)
+	svc := NewDynamoDB(goaws.NewDefaultSession(), []*Table{table}, nil)
+
 	var tests = []struct {
 		input record
 		want  error
@@ -74,7 +72,7 @@ func TestCreateItem(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		err := CreateItem(dbInfo.Svc, test.input, dbInfo.Tables[TableName])
+		err := svc.CreateItem(test.input, TableName)
 		if err != test.want {
 			t.Errorf("FAIL: %v", err)
 		}
@@ -82,8 +80,7 @@ func TestCreateItem(t *testing.T) {
 }
 
 func TestGetItem(t *testing.T) {
-	dbInfo.SetSvc(svc)
-	dbInfo.AddTable(table)
+	svc := NewDynamoDB(goaws.NewDefaultSession(), []*Table{table}, nil)
 	var tests = []struct {
 		pk       string
 		sk       string
@@ -100,7 +97,7 @@ func TestGetItem(t *testing.T) {
 
 	for _, test := range tests {
 		q := CreateNewQueryObj(test.pk, test.sk)
-		item, err := GetItem(dbInfo.Svc, q, dbInfo.Tables[TableName], test.model, expr)
+		item, err := svc.GetItem(q, TableName, test.model, expr)
 		if err != test.wantErr {
 			t.Errorf("FAIL: %v; want: %v", err, test.wantErr)
 		}
@@ -125,8 +122,7 @@ func TestGetItemWithProjection(t *testing.T) {
 		{pk: "A", sk: "001", attributes: []string{"quantity"}, size: "", wantErr: nil},                      // non existent attribute
 	}
 
-	dbInfo.SetSvc(svc)
-	dbInfo.AddTable(table)
+	svc := NewDynamoDB(goaws.NewDefaultSession(), []*Table{table}, nil)
 
 	for i, test := range tests {
 		names := []string{}
@@ -153,7 +149,7 @@ func TestGetItemWithProjection(t *testing.T) {
 			}
 		}
 
-		check, err := GetItem(dbInfo.Svc, q, dbInfo.Tables[TableName], &record{}, expr)
+		check, err := svc.GetItem(q, TableName, &record{}, expr)
 		if err != nil {
 			t.Errorf("FAIL: %v", err)
 			continue
@@ -163,8 +159,6 @@ func TestGetItemWithProjection(t *testing.T) {
 }
 
 func TestUpdateWithCondition(t *testing.T) {
-	dbInfo.SetSvc(svc)
-	dbInfo.AddTable(table)
 	var tests = []struct {
 		pk          string
 		sk          string
@@ -184,6 +178,8 @@ func TestUpdateWithCondition(t *testing.T) {
 		// {pk: "B", sk: "003", updateField: "price", exprKey: ":p", updateValue: 10.05, wantErr: nil},                                          // orig: "price": 10
 		// {pk: "C", sk: "004", updateField: "set", exprKey: ":s", updateValue: map[string]bool{"A": true, "B": true, "C": true}, wantErr: nil}, // orig: "set": ["A":false, "B":false, "C":false]
 	}
+
+	svc := NewDynamoDB(goaws.NewDefaultSession(), []*Table{table}, nil)
 	for _, test := range tests {
 		qt := test.updateValue
 		q := CreateNewQueryObj(test.pk, test.sk)
@@ -211,7 +207,7 @@ func TestUpdateWithCondition(t *testing.T) {
 			t.Errorf("FAIL %v", err)
 		}
 
-		err = UpdateItem(dbInfo.Svc, q, dbInfo.Tables[TableName], expr)
+		err = svc.UpdateItem(q, TableName, expr)
 		if err != nil && test.wantErr == nil {
 			t.Errorf("FAIL: %v; want: %v", err, test.wantErr)
 		}
