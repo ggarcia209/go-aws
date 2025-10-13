@@ -9,6 +9,7 @@ package dynamo
 */
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
@@ -566,9 +567,14 @@ func (d *DynamoDB) ScanItems(tableName string, model interface{}, startKey inter
 		FilterExpression:          expr.Filter(),
 		ProjectionExpression:      expr.Projection(),
 		TableName:                 aws.String(t.TableName),
+		Limit:                     perPage,
 	}
 
 	if startKey != nil {
+		av, err := dynamodbattribute.MarshalMap(startKey)
+		if err != nil {
+			return items, fmt.Errorf("dynamodbattribute.MarshalMap: %w", err)
+		}
 		input.ExclusiveStartKey = av
 	}
 
@@ -578,7 +584,14 @@ func (d *DynamoDB) ScanItems(tableName string, model interface{}, startKey inter
 		return items, fmt.Errorf("d.svc.Scan: %w", err)
 	}
 
-	// ADD LOGIC FOR HANDLING PAGINATION
+		// get results
+		for _, res := range result.Items {
+			item := model
+			if err = dynamodbattribute.UnmarshalMap(res, &item); err != nil {
+				return nil, fmt.Errorf("dynamodbattribute.UnmarshalMap: %w", err)
+			}
+			items = append(items, item)
+		}
 
 	for _, res := range result.Items {
 		item := model
@@ -586,7 +599,9 @@ func (d *DynamoDB) ScanItems(tableName string, model interface{}, startKey inter
 		if err != nil {
 			return []interface{}{}, fmt.Errorf("dynamodbattribute.UnmarshalMap: %w", err)
 		}
-		items = append(items, item)
+
+		// get next page
+		input.ExclusiveStartKey = result.LastEvaluatedKey
 	}
 
 	return items, nil

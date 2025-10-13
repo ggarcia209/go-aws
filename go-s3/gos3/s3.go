@@ -7,7 +7,7 @@ package gos3
 // implement customizable retry logic
 
 import (
-	"fmt"
+	"errors"
 	"io"
 	"strings"
 
