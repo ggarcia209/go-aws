@@ -59,3 +59,14 @@ func NewSessionFromEnv(profile string) Session {
 
 	return sesh
 }
+
+// NewSessionWithDefaultConfig creates session with default configuration
+func NewSessionWithDefaultConfig() Session {
+	s := session.Must(session.NewSessionWithOptions(session.Options{
+		SharedConfigState: session.SharedConfigDisable,
+	}))
+
+	sesh := Session{session: s}
+
+	return sesh
+}
