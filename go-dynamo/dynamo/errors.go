@@ -20,6 +20,12 @@ var (
 	// This error can be retried.
 	ErrTxThrottled        = errors.New("TX_THROTTLED")
 	ErrInvalidRequestType = errors.New("INVALID_REQUEST_TYPE")
+
+	ErrRateLimitExceeded      = errors.New("rate limit exceeded")
+	ErrResourceNotFound       = errors.New("resource not found")
+	ErrCollectionSizeExceeded = errors.New("collection size exceeded")
+	ErrReferenceObjectsCount  = errors.New("number of reference objects does not match number of queries")
+	ErrResourceInUse          = errors.New("resource in use")
 )
 
 type TableNotFoundErr struct {
@@ -32,4 +38,16 @@ func (e *TableNotFoundErr) Error() string {
 
 func NewTableNotFoundErr(tableName string) *TableNotFoundErr {
 	return &TableNotFoundErr{tableName: tableName}
+}
+
+type ConditionCheckFailedErr struct {
+	msg string
+}
+
+func (e *ConditionCheckFailedErr) Error() string {
+	return fmt.Sprintf("condition check failed: %s", e.msg)
+}
+
+func NewConditionCheckFailedErr(msg string) *ConditionCheckFailedErr {
+	return &ConditionCheckFailedErr{msg: msg}
 }

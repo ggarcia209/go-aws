@@ -107,3 +107,17 @@ type UploadFileResponse struct {
 	UploadID  string `json:"upload_id"`
 	ETag      string `json:"etag"`
 }
+
+// DeleteFile deletes the the file at bucket/key
+func (s *S3) DeleteFile(bucket, key string) error {
+	input := &s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}
+
+	if _, err := s.svc.DeleteObject(input); err != nil {
+		return fmt.Errorf("s.svc.DeleteObject: %w", err)
+	}
+
+	return nil
+}
