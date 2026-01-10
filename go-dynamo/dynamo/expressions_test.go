@@ -57,3 +57,51 @@ func TestExpressionBuild(t *testing.T) {
 	}
 
 }
+
+func TestKeyCondition(t *testing.T) {
+	var tests = []struct {
+		pk      string
+		pkv     int
+		sk      string
+		skv     int
+		want    string
+		wantErr error
+	}{
+		{pk: "parition_key", pkv: 1, sk: "sort_key", skv: 2, want: "(#0 = :0) AND (#1 >= :1)", wantErr: nil},
+		{pk: "parition_key", pkv: 1, sk: "", skv: 0, want: "#0 = :0", wantErr: nil},
+	}
+	for _, test := range tests {
+		// condition = if curr - quantity >= 0
+		cond := NewKeyCondition()
+		if test.sk != "" {
+			cond.Equal(test.pk, test.pkv).GreaterThanEqual(test.sk, test.skv)
+		} else {
+			cond.Equal(test.pk, test.pkv)
+		}
+
+		// update = setMinus - current - quantity
+
+		// build expression
+		eb := NewExprBuilder()
+		eb.SetKeyCondition(cond)
+		expr, err := eb.BuildExpression()
+		if err != nil {
+			t.Errorf("FAIL %v", err)
+			return
+		}
+
+		res := *expr.KeyCondition()
+		if res != test.want {
+			t.Errorf("got: %s; want: %s", res, test.want)
+		}
+
+		t.Logf("%v", res)
+		for k, v := range expr.Names() {
+			t.Logf("%s: %s", k, *v)
+		}
+		for k, v := range expr.Values() {
+			t.Logf("%s: %s", k, *v)
+		}
+	}
+
+}

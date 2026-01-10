@@ -581,6 +581,7 @@ func (d *DynamoDB) QueryItems(tableName string, model any, startKey any, expr Ex
 
 	// Build the query input parameters
 	input := &dynamodb.QueryInput{
+		KeyConditionExpression:    expr.KeyCondition(),
 		ExpressionAttributeNames:  expr.Names(),
 		ExpressionAttributeValues: expr.Values(),
 		FilterExpression:          expr.Filter(),

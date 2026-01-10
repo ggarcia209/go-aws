@@ -74,7 +74,9 @@ func (e *ExprBuilder) SetFilter(name string, value interface{}) {
 }
 
 // SetKeyCondition creates a KeyConditionBuilder object with the given field name and value.
-func (e *ExprBuilder) SetKeyCondition(name string, value interface{}) {}
+func (e *ExprBuilder) SetKeyCondition(cond KeyConditions) {
+	e.KeyCondition = cond.KeyCondition
+}
 
 // SetProjection creates a ProjectionBuilder object from the given list of field names.
 func (e *ExprBuilder) SetProjection(names []string) {
@@ -167,7 +169,8 @@ func (u *UpdateExpr) SetIfNotExists(name string, value interface{}) {
 
 // SetPlus creates a new Set Update expression, where the value is the sum of the 'aug' and 'add' args.
 // SetPlus uses the aug value as a string type expression variable when the variable value is set to true.
-// 	Ex: 'SET #name = #min + sub
+//
+//	Ex: 'SET #name = #min + sub
 func (u *UpdateExpr) SetPlus(name string, aug, add interface{}, variable bool) {
 	_, ok := aug.(string)
 	if variable && ok {
@@ -182,7 +185,8 @@ func (u *UpdateExpr) SetPlus(name string, aug, add interface{}, variable bool) {
 
 // SetPlus creates a new Set Update expression, where the value is the difference of the 'min' and 'sub' args.
 // SetMinus uses the min value as a string type expression variable when the variable value is set to true.
-// 	Ex: 'SET #name = #min - sub
+//
+//	Ex: 'SET #name = #min - sub
 func (u *UpdateExpr) SetMinus(name string, min, sub interface{}, variable bool) {
 	_, ok := min.(string)
 	if variable && ok {
@@ -226,9 +230,106 @@ func NewUpdateExpr() UpdateExpr {
 	return u
 }
 
+func NewKeyCondition() KeyConditions {
+	c := KeyConditions{}
+	return c
+}
+
 func NewCondition() Conditions {
 	c := Conditions{}
 	c.Condition = expression.ConditionBuilder{}
+	return c
+}
+
+/* Conditons wrapper and methods */
+
+// KeyConditions wraps the expression.KeyConditionBuilder object.
+type KeyConditions struct {
+	KeyCondition *expression.KeyConditionBuilder
+}
+
+// And creates an AND boolean condition.
+func (c *KeyConditions) BeginsWith(name string, prefix string) *KeyConditions {
+	condition := expression.Key(name).BeginsWith(prefix)
+	if c.KeyCondition != nil {
+		newCond := c.KeyCondition.And(condition)
+		c.KeyCondition = &newCond
+	} else {
+		c.KeyCondition = &condition
+	}
+
+	return c
+}
+
+func (c *KeyConditions) Between(name string, lower, upper interface{}) *KeyConditions {
+	condition := expression.Key(name).Between(expression.Value(lower), expression.Value(upper))
+	if c.KeyCondition != nil {
+		newCond := c.KeyCondition.And(condition)
+		c.KeyCondition = &newCond
+	} else {
+		c.KeyCondition = &condition
+	}
+
+	return c
+}
+
+func (c *KeyConditions) Equal(name string, value interface{}) *KeyConditions {
+	condition := expression.Key(name).Equal(expression.Value(value))
+	if c.KeyCondition != nil {
+		newCond := c.KeyCondition.And(condition)
+		c.KeyCondition = &newCond
+	} else {
+		c.KeyCondition = &condition
+	}
+
+	return c
+}
+
+func (c *KeyConditions) GreaterThan(name string, value interface{}) *KeyConditions {
+	condition := expression.Key(name).GreaterThan(expression.Value(value))
+	if c.KeyCondition != nil {
+		newCond := c.KeyCondition.And(condition)
+		c.KeyCondition = &newCond
+	} else {
+		c.KeyCondition = &condition
+	}
+
+	return c
+}
+
+func (c *KeyConditions) GreaterThanEqual(name string, value interface{}) *KeyConditions {
+	condition := expression.Key(name).GreaterThanEqual(expression.Value(value))
+	if c.KeyCondition != nil {
+		newCond := c.KeyCondition.And(condition)
+		c.KeyCondition = &newCond
+	} else {
+		c.KeyCondition = &condition
+	}
+
+	return c
+}
+
+func (c *KeyConditions) LessThan(name string, value interface{}) *KeyConditions {
+	condition := expression.Key(name).LessThan(expression.Value(value))
+	if c.KeyCondition != nil {
+		newCond := c.KeyCondition.And(condition)
+		c.KeyCondition = &newCond
+	} else {
+		c.KeyCondition = &condition
+	}
+
+	return c
+}
+
+func (c *KeyConditions) LessThanEqual(name string, value interface{}) *KeyConditions {
+	condition := expression.Key(name).LessThanEqual(expression.Value(value))
+	if c.KeyCondition != nil {
+		newCond := c.KeyCondition.And(condition)
+		c.KeyCondition = &newCond
+	} else {
+		c.KeyCondition = &condition
+	}
+
 	return c
 }
 
