@@ -495,15 +495,21 @@ func (d *DynamoDB) batchWriteUtil(input *dynamodb.BatchWriteItemInput) (*dynamod
 	return result, nil
 }
 
+type ScanResults struct {
+	Results []any                               `json:"results"`
+	PerPage int64                               `json:"per_page,omitempy"`
+	LastKey map[string]*dynamodb.AttributeValue `json:"last_key,omitempty"`
+}
+
 // ScanItems scans the given Table for items matching the given expression parameters.
-func (d *DynamoDB) ScanItems(tableName string, model interface{}, startKey interface{}, expr Expression, perPage *int64) ([]interface{}, error) {
+func (d *DynamoDB) ScanItems(tableName string, model any, startKey any, expr Expression, perPage *int64) (*ScanResults, error) {
 	// get table
 	t := d.tables[tableName]
 	if t == nil {
 		return nil, NewTableNotFoundErr(tableName)
 	}
 
-	items := []interface{}{}
+	items := make([]any, 0)
 
 	// Build the query input parameters
 	input := &dynamodb.ScanInput{
@@ -518,7 +524,7 @@ func (d *DynamoDB) ScanItems(tableName string, model interface{}, startKey inter
 	if startKey != nil {
 		av, err := dynamodbattribute.MarshalMap(startKey)
 		if err != nil {
-			return items, fmt.Errorf("dynamodbattribute.MarshalMap: %w", err)
+			return nil, fmt.Errorf("dynamodbattribute.MarshalMap: %w", err)
 		}
 		input.ExclusiveStartKey = av
 	}
@@ -542,14 +548,91 @@ func (d *DynamoDB) ScanItems(tableName string, model interface{}, startKey inter
 		item := model
 		err = dynamodbattribute.UnmarshalMap(res, &item)
 		if err != nil {
-			return []interface{}{}, fmt.Errorf("dynamodbattribute.UnmarshalMap: %w", err)
+			return nil, fmt.Errorf("dynamodbattribute.UnmarshalMap: %w", err)
+		}
+	}
+
+	scanResult := &ScanResults{
+		Results: items,
+		LastKey: result.LastEvaluatedKey,
+	}
+
+	if perPage != nil {
+		scanResult.PerPage = *perPage
+	}
+	return scanResult, nil
+}
+
+type QueryResults struct {
+	Results []any                               `json:"results"`
+	PerPage int64                               `json:"per_page,omitempty"`
+	LastKey map[string]*dynamodb.AttributeValue `json:"last_key,omitempty"`
+}
+
+// QueryItems queries the given Table for items matching the given expression parameters.
+func (d *DynamoDB) QueryItems(tableName string, model any, startKey any, expr Expression, perPage *int64) (*QueryResults, error) {
+	// get table
+	t := d.tables[tableName]
+	if t == nil {
+		return nil, NewTableNotFoundErr(tableName)
+	}
+
+	items := make([]any, 0)
+
+	// Build the query input parameters
+	input := &dynamodb.QueryInput{
+		ExpressionAttributeNames:  expr.Names(),
+		ExpressionAttributeValues: expr.Values(),
+		FilterExpression:          expr.Filter(),
+		ProjectionExpression:      expr.Projection(),
+		TableName:                 aws.String(t.TableName),
+		Limit:                     perPage,
+	}
+
+	if startKey != nil {
+		av, err := dynamodbattribute.MarshalMap(startKey)
+		if err != nil {
+			return nil, fmt.Errorf("dynamodbattribute.MarshalMap: %w", err)
+		}
+		input.ExclusiveStartKey = av
+	}
+
+	// Make the DynamoDB Query API call
+	result, err := d.svc.Query(input)
+	if err != nil {
+		return nil, fmt.Errorf("d.svc.Scan: %w", handleErr(err))
+	}
+
+	// get results
+	for _, res := range result.Items {
+		item := model
+		if err = dynamodbattribute.UnmarshalMap(res, &item); err != nil {
+			return nil, fmt.Errorf("dynamodbattribute.UnmarshalMap: %w", err)
+		}
+		items = append(items, item)
+	}
+
+	for _, res := range result.Items {
+		item := model
+		err = dynamodbattribute.UnmarshalMap(res, &item)
+		if err != nil {
+			return nil, fmt.Errorf("dynamodbattribute.UnmarshalMap: %w", err)
 		}
 
 		// get next page
 		input.ExclusiveStartKey = result.LastEvaluatedKey
 	}
 
-	return items, nil
+	queryResult := &QueryResults{
+		Results: items,
+		LastKey: result.LastEvaluatedKey,
+	}
+
+	if perPage != nil {
+		queryResult.PerPage = *perPage
+	}
+
+	return queryResult, nil
 }
 
 func (d *DynamoDB) batchGetUtil(input *dynamodb.BatchGetItemInput) (*dynamodb.BatchGetItemOutput, error) {
