@@ -24,6 +24,7 @@ const DefaultPartitionSize = int64(1024 * 1024 * 64) // 64mb
 type S3Logic interface {
 	GetObject(bucket, key string) ([]byte, error)
 	UploadFile(bucket, key string, file io.Reader, publicRead bool) (UploadFileResponse, error)
+	DeleteFile(bucket, key string) error
 }
 
 type S3 struct {
