@@ -18,6 +18,12 @@ type GetFileRequest struct {
 	UseChecksum bool   `json:"use_checksum"`
 }
 
+type HeadObjectResponse struct {
+	ContentType    string            `json:"content_type"`
+	Sha256Checksum string            `json:"sha256_checksum"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+}
+
 type GetPresignedUrlRequest struct {
 	ExpirySeconds int                `json:"expiry_seconds"`
 	Put           *UploadFileRequest `json:"put,omitempty"`

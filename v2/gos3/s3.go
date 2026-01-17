@@ -20,6 +20,7 @@ import (
 //go:generate mockgen -destination=../mocks/gos3mock/s3.go -package=gos3mock . S3Logic
 type S3Logic interface {
 	GetObject(ctx context.Context, req GetFileRequest) ([]byte, error)
+	HeadObject(ctx context.Context, req GetFileRequest) (*HeadObjectResponse, error)
 	CheckIfObjectExists(ctx context.Context, req GetFileRequest) (bool, error)
 	UploadFile(ctx context.Context, req UploadFileRequest) (*UploadFileResponse, error)
 	DeleteFile(ctx context.Context, bucket, key string) error
@@ -82,6 +83,52 @@ func (s *S3) GetObject(ctx context.Context, req GetFileRequest) ([]byte, error) 
 	res := []byte(buf.String())
 
 	return res, nil
+}
+
+func (s *S3) HeadObject(ctx context.Context, req GetFileRequest) (*HeadObjectResponse, error) {
+	input := &s3.HeadObjectInput{
+		Bucket: aws.String(req.Bucket),
+		Key:    aws.String(req.Key),
+	}
+
+	if req.UseChecksum {
+		input.ChecksumMode = types.ChecksumModeEnabled
+	}
+
+	obj, err := s.svc.HeadObject(ctx, input)
+	if err != nil {
+		var notExist *types.NoSuchKey
+		var re *awshttp.ResponseError
+		switch {
+		case errors.As(err, &notExist):
+			return nil, ErrItemNotFound
+		case errors.As(err, &re):
+			if re.ResponseError == nil {
+				return nil, fmt.Errorf("s.svc.HeadObject: %w", re.Err)
+			}
+			switch re.ResponseError.HTTPStatusCode() {
+			case http.StatusNotFound:
+				return nil, ErrItemNotFound
+			default:
+				return nil, fmt.Errorf("s.svc.HeadObject: %w", re.Err)
+			}
+		default:
+			return nil, fmt.Errorf("s.svc.GetObject: %w", err)
+		}
+	}
+
+	resp := &HeadObjectResponse{
+		Metadata: obj.Metadata,
+	}
+
+	if obj.ContentType != nil {
+		resp.ContentType = *obj.ContentType
+	}
+
+	if req.UseChecksum && obj.ChecksumSHA256 != nil {
+		resp.Sha256Checksum = *obj.ChecksumSHA256
+	}
+	return resp, nil
 }
 
 // CheckIfObjectExists checks if a head object exists at bucket/key
