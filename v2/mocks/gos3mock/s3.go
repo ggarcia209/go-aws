@@ -100,6 +100,21 @@ func (mr *MockS3LogicMockRecorder) GetPresignedURL(ctx, req any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPresignedURL", reflect.TypeOf((*MockS3Logic)(nil).GetPresignedURL), ctx, req)
 }
 
+// HeadObject mocks base method.
+func (m *MockS3Logic) HeadObject(ctx context.Context, req gos3.GetFileRequest) (*gos3.HeadObjectResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HeadObject", ctx, req)
+	ret0, _ := ret[0].(*gos3.HeadObjectResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// HeadObject indicates an expected call of HeadObject.
+func (mr *MockS3LogicMockRecorder) HeadObject(ctx, req any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeadObject", reflect.TypeOf((*MockS3Logic)(nil).HeadObject), ctx, req)
+}
+
 // UploadFile mocks base method.
 func (m *MockS3Logic) UploadFile(ctx context.Context, req gos3.UploadFileRequest) (*gos3.UploadFileResponse, error) {
 	m.ctrl.T.Helper()
