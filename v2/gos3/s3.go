@@ -5,15 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/ggarcia209/go-aws/v2/goaws"
 	"go.openly.dev/pointy"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
 )
 
 //go:generate mockgen -destination=../mocks/gos3mock/s3.go -package=gos3mock . S3Logic
@@ -54,9 +55,20 @@ func (s *S3) GetObject(ctx context.Context, req GetFileRequest) ([]byte, error) 
 	obj, err := s.svc.GetObject(ctx, input)
 	if err != nil {
 		var notExist *types.NoSuchKey
+		var re *awshttp.ResponseError
 		switch {
 		case errors.As(err, &notExist):
 			return nil, ErrItemNotFound
+		case errors.As(err, &re):
+			if re.ResponseError == nil {
+				return nil, fmt.Errorf("s.svc.HeadObject: %w", re.Err)
+			}
+			switch re.ResponseError.HTTPStatusCode() {
+			case http.StatusNotFound:
+				return nil, ErrItemNotFound
+			default:
+				return nil, fmt.Errorf("s.svc.HeadObject: %w", re.Err)
+			}
 		default:
 			return nil, fmt.Errorf("s.svc.GetObject: %w", err)
 		}
@@ -82,9 +94,20 @@ func (s *S3) CheckIfObjectExists(ctx context.Context, req GetFileRequest) (bool,
 		},
 	); err != nil {
 		var notExist *types.NoSuchKey
+		var re *awshttp.ResponseError
 		switch {
 		case errors.As(err, &notExist):
 			return false, nil
+		case errors.As(err, &re):
+			if re.ResponseError == nil {
+				return false, fmt.Errorf("s.svc.HeadObject: %w", re.Err)
+			}
+			switch re.ResponseError.HTTPStatusCode() {
+			case http.StatusNotFound:
+				return false, nil
+			default:
+				return false, fmt.Errorf("s.svc.HeadObject: %w", re.Err)
+			}
 		default:
 			return false, fmt.Errorf("s.svc.HeadObject: %w", err)
 		}
